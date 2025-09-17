@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Student — Tap Anywhere</title>
+<style>
+  :root { --bg:#0b0f14; --fg:#e8edf2; --muted:#9aa4af; --accent:#4ea1ff; }
+  html,body { margin:0; height:100%; background:var(--bg); color:var(--fg); font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif; }
+  .wrap { max-width:900px; margin:0 auto; padding:16px; display:flex; flex-direction:column; gap:12px; }
+  .muted { color:var(--muted); font-size:13px; }
+  .panel { background:#0f141b; border:1px solid #1f2732; border-radius:14px; padding:12px; }
+  .stage { position:relative; width:100%; aspect-ratio:16/9; background:#0a0e13; border-radius:12px; overflow:hidden; border:1px solid #1f2732; touch-action:manipulation; }
+  .stage img { width:100%; height:100%; object-fit:contain; display:block; }
+  .tap { position:absolute; inset:0; }
+  .blip { position:absolute; width:12px; height:12px; border-radius:50%; background:var(--accent); border:2px solid rgba(0,0,0,.5); transform:translate(-50%,-50%); opacity:0; transition:opacity .2s ease; }
+  .bar { display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap; }
+  .code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; background:#121923; border:1px solid #1f2732; padding:4px 8px; border-radius:8px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="panel bar">
+    <div>Session: <span id="sessionId" class="code"></span></div>
+    <div>Slide <span id="slideIdx">1</span>/<span id="slideTotal">1</span></div>
+  </div>
+  <div class="stage panel" id="stage">
+    <img id="slideImg" alt="Slide" />
+    <div class="tap" id="tapLayer"></div>
+    <div id="blip" class="blip"></div>
+  </div>
+  <div class="muted">Tap anywhere on the slide to send your mark. Every tap is submitted instantly.</div>
+</div>
+
+<script type="module">
+/*** ── CONFIG (edit these) ── ***/
+const FIREBASE_CONFIG = {
+  apiKey: "YOUR_API_KEY",
+  authDomain: "YOUR_DOMAIN.firebaseapp.com",
+  projectId: "YOUR_PROJECT_ID",
+  appId: "YOUR_APP_ID",
+};
+const SESSION_ID = "demo-session-001";
+const SLIDE_IMAGES = [
+  "https://images.unsplash.com/photo-1529107386315-e1a2ed48a620?q=80&w=1920&auto=format&fit=crop",
+  "https://images.unsplash.com/photo-1543286386-713bdd548da4?q=80&w=1920&auto=format&fit=crop",
+  "https://images.unsplash.com/photo-1532614338840-ab30cf10ed36?q=80&w=1920&auto=format&fit=crop"
+];
+
+/*** ── App ── ***/
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+import { getFirestore, doc, onSnapshot, collection, addDoc } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+
+const app = initializeApp(FIREBASE_CONFIG);
+const db  = getFirestore(app);
+const auth = getAuth(app);
+await signInAnonymously(auth).catch(()=>{});
+
+const $ = id => document.getElementById(id);
+$("sessionId").textContent = SESSION_ID;
+$("slideTotal").textContent = SLIDE_IMAGES.length;
+
+const stage = $("stage"), imgEl = $("slideImg"), tapLayer = $("tapLayer"), blip = $("blip");
+let currentSlide = 0;
+
+function computeImageRect(){
+  const r = stage.getBoundingClientRect();
+  const W = Math.floor(r.width), H = Math.floor(r.height);
+  const iw = imgEl.naturalWidth || 1920, ih = imgEl.naturalHeight || 1080;
+  const ia = iw/ih, ca = W/H;
+  if (ca > ia) {
+    const h = H, w = Math.round(h*ia), x = Math.round((W - w)/2), y = 0;
+    return {x,y,w,h, W, H};
+  } else {
+    const w = W, h = Math.round(w/ia), x = 0, y = Math.round((H - h)/2);
+    return {x,y,w,h, W, H};
+  }
+}
+function setSlide(i){
+  currentSlide = Math.max(0, Math.min(SLIDE_IMAGES.length - 1, i));
+  $("slideIdx").textContent = String(currentSlide + 1);
+  imgEl.src = SLIDE_IMAGES[currentSlide];
+}
+imgEl.onload = ()=>{}; // layout handled by CSS
+
+// Listen to presenter slide index
+const sessRef = doc(db, "sessions", SESSION_ID);
+onSnapshot(sessRef, (snap) => {
+  const data = snap.data() || {};
+  const idx = Number.isInteger(data.slideIndex) ? data.slideIndex : 0;
+  if (idx !== currentSlide) setSlide(idx);
+});
+
+// Tap → normalized coordinates within the displayed image (ignore letterbox clicks)
+tapLayer.addEventListener("click", async (e) => {
+  const rect = stage.getBoundingClientRect();
+  const clickX = e.clientX - rect.left;
+  const clickY = e.clientY - rect.top;
+  const ir = computeImageRect();
+  const inside = (clickX >= ir.x && clickX <= ir.x + ir.w && clickY >= ir.y && clickY <= ir.y + ir.h);
+  if (!inside) return; // ignore clicks in the black bars
+  const nx = (clickX - ir.x) / ir.w;
+  const ny = (clickY - ir.y) / ir.h;
+
+  // Feedback blip
+  blip.style.left = (nx*100) + "%";
+  blip.style.top  = (ny*100) + "%";
+  blip.style.opacity = "1";
+  setTimeout(()=> blip.style.opacity = "0", 250);
+
+  const col = collection(db, "sessions", SESSION_ID, "slides", String(currentSlide), "responses");
+  await addDoc(col, { x: nx, y: ny, ts: Date.now() });
+});
+
+setSlide(0);
+</script>
+</body>
+</html>

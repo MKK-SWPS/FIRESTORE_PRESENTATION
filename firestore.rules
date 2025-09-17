@@ -1,0 +1,12 @@
+// Minimal demo rules — open writes. Tighten before real use.
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /sessions/{sessionId} {
+      allow read, write: if true;
+      match /slides/{slideIndex}/responses/{docId} {
+        allow read, write: if true;
+      }
+    }
+  }
+}
