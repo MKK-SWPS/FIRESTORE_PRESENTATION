@@ -36,9 +36,17 @@ from pathlib import Path
 import logging
 
 # Windows-specific imports
-import win32gui
-import win32con
-import win32api
+# Windows-specific imports (only on Windows)
+HAS_WIN32 = False
+if platform.system() == "Windows":
+    try:
+        import win32gui
+        import win32con
+        import win32api
+        HAS_WIN32 = True
+    except ImportError:
+        print("Warning: Windows API modules not available")
+        HAS_WIN32 = False
 from ctypes import windll, wintypes, c_int, c_bool, byref
 
 # Firebase imports
@@ -555,17 +563,43 @@ class DesktopHelper:
     
     def _setup_overlay(self):
         """Create and show the overlay window."""
-        monitor, monitor_index = self._get_monitor_info()
-        
-        self.overlay = OverlayWindow(
-            monitor.x, monitor.y, monitor.width, monitor.height,
-            self.config.get('dot_color', '#8E4EC6'),
-            self.config.get('dot_radius_px', 8),
-            self.config.get('fade_ms', 10000)
-        )
-        
-        self.overlay.show()
-        logger.info(f"Overlay window created on monitor {monitor_index}")
+        try:
+            import platform
+            
+            if platform.system() == "Windows":
+                # Use Windows-specific overlay
+                from overlay import OverlayWindow, FallbackOverlayWindow
+                
+                monitor, monitor_index = self._get_monitor_info()
+                
+                # Try the main overlay first
+                try:
+                    self.overlay = OverlayWindow(
+                        monitor.x, monitor.y, monitor.width, monitor.height,
+                        self.config.get('dot_color', '#8E4EC6'),
+                        self.config.get('dot_radius_px', 8),
+                        self.config.get('fade_ms', 10000)
+                    )
+                    self.overlay.show()
+                    logger.info(f"✅ Main overlay window created on monitor {monitor_index}")
+                    
+                except Exception as e:
+                    logger.warning(f"Main overlay failed: {e}, trying fallback...")
+                    
+                    # Fallback to the simpler overlay approach
+                    self.overlay = FallbackOverlayWindow()
+                    self.overlay.show()
+                    logger.info(f"✅ Fallback overlay window created")
+            else:
+                # Use Linux-compatible overlay for testing
+                from overlay_linux import LinuxOverlayWindow
+                self.overlay = LinuxOverlayWindow()
+                self.overlay.show()
+                logger.info(f"✅ Linux overlay window created for testing")
+                
+        except Exception as e:
+            logger.error(f"❌ Failed to create any overlay: {e}")
+            self.overlay = None
     
     def _setup_firestore_watcher(self):
         """Setup Firestore document watchers."""

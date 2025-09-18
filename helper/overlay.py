@@ -16,6 +16,7 @@ Requirements:
 
 import time
 import math
+import platform
 from typing import List, Tuple
 import logging
 
@@ -23,10 +24,18 @@ from PySide6.QtWidgets import QWidget
 from PySide6.QtCore import Qt, QTimer, QRect
 from PySide6.QtGui import QPainter, QBrush, QColor, QPen
 
-# Windows API imports
-import win32gui
-import win32con
-from ctypes import windll
+# Windows API imports (only on Windows)
+if platform.system() == "Windows":
+    try:
+        import win32gui
+        import win32con
+        from ctypes import windll
+        HAS_WIN32 = True
+    except ImportError:
+        HAS_WIN32 = False
+        print("Warning: Windows API modules not available")
+else:
+    HAS_WIN32 = False
 
 logger = logging.getLogger(__name__)
 
@@ -118,9 +127,17 @@ class OverlayWindow(QWidget):
     
     def _apply_transparency_and_click_through(self):
         """Apply Windows-specific extended styles for click-through behavior."""
+        if not HAS_WIN32:
+            logger.warning("Windows API not available, skipping transparency setup")
+            return
+            
         try:
             # Get the window handle
             hwnd = int(self.winId())
+            
+            if not hwnd:
+                logger.error("Could not get window handle")
+                return
             
             # Get current extended style
             extended_style = win32gui.GetWindowLong(hwnd, win32con.GWL_EXSTYLE)
@@ -132,32 +149,67 @@ class OverlayWindow(QWidget):
                         win32con.WS_EX_TOPMOST)
             
             # Apply the new style
-            win32gui.SetWindowLong(hwnd, win32con.GWL_EXSTYLE, new_style)
+            result = win32gui.SetWindowLong(hwnd, win32con.GWL_EXSTYLE, new_style)
             
-            # Set layered window attributes for transparency
-            # This makes the window fully transparent except for what we draw
-            windll.user32.SetLayeredWindowAttributes(hwnd, 0, 255, win32con.LWA_ALPHA)
+            if result == 0:
+                logger.warning("SetWindowLong may have failed, but continuing...")
+            
+            # Try different approaches for layered window attributes
+            try:
+                # Method 1: Standard SetLayeredWindowAttributes
+                result = windll.user32.SetLayeredWindowAttributes(hwnd, 0, 255, win32con.LWA_ALPHA)
+                if result:
+                    logger.info("Applied transparency using SetLayeredWindowAttributes")
+                else:
+                    logger.warning("SetLayeredWindowAttributes returned 0, trying alternative...")
+                    
+                    # Method 2: Try with different parameters
+                    result2 = windll.user32.SetLayeredWindowAttributes(hwnd, 0, 200, win32con.LWA_ALPHA)
+                    if result2:
+                        logger.info("Applied transparency with reduced alpha")
+                    else:
+                        logger.warning("All SetLayeredWindowAttributes methods failed")
+                        
+            except Exception as e:
+                logger.error(f"SetLayeredWindowAttributes failed: {e}")
             
             logger.info("Applied click-through and transparency styles")
             
         except Exception as e:
             logger.error(f"Failed to apply window transparency: {e}")
+            # Continue anyway - overlay might still work partially
     
-    def add_dot(self, x: int, y: int):
-        """Add a new tap dot at the specified screen coordinates."""
-        # Convert screen coordinates to widget coordinates
-        widget_pos = self.mapFromGlobal(self.mapToParent(self.rect().topLeft()))
-        local_x = x - widget_pos.x()
-        local_y = y - widget_pos.y()
+    def add_dot(self, x, y):
+        """Add a new dot at the specified coordinates."""
+        timestamp = time.time()
+        self.dots.append((x, y, timestamp))
+        logger.info(f"✅ Dot added to overlay at ({x}, {y})")
         
-        # Check if coordinates are within the widget bounds
-        if (0 <= local_x <= self.width() and 0 <= local_y <= self.height()):
-            dot = TapDot(local_x, local_y, self.dot_color, self.dot_radius, self.fade_ms)
-            self.dots.append(dot)
-            logger.debug(f"Added dot at ({local_x}, {local_y}) from screen ({x}, {y})")
-            self.update()  # Trigger repaint
-        else:
-            logger.warning(f"Dot coordinates ({x}, {y}) outside widget bounds")
+        # Force immediate repaint using multiple methods
+        try:
+            self.update()
+            self.repaint()
+            
+            # Also try to force a Windows redraw if on Windows
+            if HAS_WIN32:
+                hwnd = int(self.winId())
+                windll.user32.InvalidateRect(hwnd, None, True)
+                windll.user32.UpdateWindow(hwnd)
+            
+            # Force show if hidden
+            if not self.isVisible():
+                self.show()
+                self.raise_()
+                self.activateWindow()
+                
+        except Exception as e:
+            logger.error(f"Error forcing repaint: {e}")
+        
+        # Start timer to remove old dots
+        if not hasattr(self, 'cleanup_timer'):
+            self.cleanup_timer = QTimer()
+            self.cleanup_timer.timeout.connect(self._cleanup_dots)
+            self.cleanup_timer.start(100)  # Check every 100ms
     
     def clear_dots(self):
         """Remove all dots from the overlay."""
@@ -183,36 +235,44 @@ class OverlayWindow(QWidget):
             self.update()
     
     def paintEvent(self, event):
-        """Custom paint event to draw the tap dots."""
-        if not self.dots:
-            return
-        
+        """Handle paint events to draw tap dots."""
         painter = QPainter(self)
-        painter.setRenderHint(QPainter.Antialiasing, True)
         
-        # Draw each dot
-        for dot in self.dots:
-            alpha = dot.get_alpha()
-            if alpha <= 0:
-                continue
+        # Enable anti-aliasing
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        
+        # Clear the background
+        painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_Clear)
+        painter.fillRect(self.rect(), QColor(0, 0, 0, 0))
+        painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceOver)
+        
+        current_time = time.time()
+        
+        # Draw dots and remove expired ones
+        self.dots = [(x, y, timestamp) for x, y, timestamp in self.dots 
+                     if current_time - timestamp < self.DOT_DURATION]
+        
+        for x, y, timestamp in self.dots:
+            # Calculate fade based on age
+            age = current_time - timestamp
+            fade_factor = 1.0 - (age / self.DOT_DURATION)
+            alpha = int(255 * fade_factor)
             
-            # Create color with current alpha
-            color = QColor(dot.color)
-            color.setAlphaF(alpha)
-            
-            # Set up painter
+            # Set up the pen and brush for the dot
+            color = QColor(255, 0, 0, alpha)  # Red with alpha
+            painter.setPen(QPen(color, 2))
             painter.setBrush(QBrush(color))
-            painter.setPen(QPen(color, 1))
             
-            # Draw the dot as a filled circle
-            painter.drawEllipse(
-                int(dot.x - dot.radius), 
-                int(dot.y - dot.radius),
-                dot.radius * 2, 
-                dot.radius * 2
-            )
+            # Draw a circle
+            painter.drawEllipse(int(x - self.DOT_SIZE//2), int(y - self.DOT_SIZE//2), 
+                              self.DOT_SIZE, self.DOT_SIZE)
+            
+            logger.debug(f"Drew dot at ({x}, {y}) with alpha {alpha}")
         
         painter.end()
+        
+        # Update the display
+        self.update() if self.dots else None
     
     def mousePressEvent(self, event):
         """Override mouse events to ensure they don't interfere."""
@@ -245,6 +305,78 @@ class OverlayWindow(QWidget):
         self.clear_dots()
         logger.info("Overlay window closed")
         super().closeEvent(event)
+
+
+class FallbackOverlayWindow(QWidget):
+    """Simpler fallback overlay window with basic transparency."""
+    
+    def __init__(self):
+        super().__init__()
+        self.dots = []
+        self.DOT_SIZE = 20
+        self.DOT_DURATION = 3.0
+        
+        # Simpler window setup
+        self.setWindowFlags(
+            Qt.WindowType.WindowStaysOnTopHint |
+            Qt.WindowType.FramelessWindowHint |
+            Qt.WindowType.Tool |
+            Qt.WindowType.WindowTransparentForInput
+        )
+        
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        self.setStyleSheet("background-color: transparent;")
+        
+        # Full screen
+        from PySide6.QtWidgets import QApplication
+        desktop = QApplication.desktop()
+        combined_geometry = QRect()
+        for i in range(desktop.screenCount()):
+            screen_geometry = desktop.screenGeometry(i)
+            combined_geometry = combined_geometry.united(screen_geometry)
+        
+        self.setGeometry(combined_geometry)
+        
+        # Set window opacity
+        self.setWindowOpacity(0.8)
+        
+        logger.info("Created fallback overlay window")
+    
+    def add_dot(self, x, y):
+        """Add a dot and force repaint."""
+        timestamp = time.time()
+        self.dots.append((x, y, timestamp))
+        logger.info(f"✅ Dot added to fallback overlay at ({x}, {y})")
+        
+        self.update()
+        self.repaint()
+        
+        if not self.isVisible():
+            self.show()
+            self.raise_()
+    
+    def paintEvent(self, event):
+        """Simple paint event."""
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        
+        current_time = time.time()
+        self.dots = [(x, y, timestamp) for x, y, timestamp in self.dots 
+                     if current_time - timestamp < self.DOT_DURATION]
+        
+        for x, y, timestamp in self.dots:
+            age = current_time - timestamp
+            fade_factor = 1.0 - (age / self.DOT_DURATION)
+            alpha = int(255 * fade_factor)
+            
+            color = QColor(255, 0, 0, alpha)
+            painter.setPen(QPen(color, 3))
+            painter.setBrush(QBrush(color))
+            
+            painter.drawEllipse(int(x - self.DOT_SIZE//2), int(y - self.DOT_SIZE//2), 
+                              self.DOT_SIZE, self.DOT_SIZE)
+        
+        painter.end()
 
 
 class TestOverlay:
