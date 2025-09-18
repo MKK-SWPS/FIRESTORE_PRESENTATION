@@ -27,21 +27,21 @@
   "trigger_file": "capture_now.txt", 
   "_trigger_file_note": "Create/touch this file to trigger screenshot capture. Gets deleted after use",
   
-  "dot_color": "#8E4EC6",
-  "_dot_color_note": "Color of tap dots shown on overlay (hex format). Default is purple",
+  "dot_color": "#FF0000",
+  "_dot_color_note": "Color of tap dots shown on overlay (hex format). Red for high visibility",
   
-  "dot_radius_px": 8,
-  "_dot_radius_note": "Radius of tap dots in pixels",
+  "dot_radius_px": 15,
+  "_dot_radius_note": "Radius of tap dots in pixels. Larger for better visibility",
   
   "fade_ms": 10000,
-  "_fade_ms_note": "How long dots stay visible before fading out (milliseconds). 10000 = 10 seconds"
+  "_fade_ms_note": "How long dots stay visible before fading out (milliseconds). 10000 = 10 seconds",
 
-  ,"enable_hotkey": false,
+  "enable_hotkey": false,
   "_enable_hotkey_note": "Set to true to attempt global hotkey registration (may fail on some systems)",
-  "overlay_mode": "auto",
+  "overlay_mode": "simple",
   "_overlay_mode_note": "auto=try layered then fallback, simple=always simple QWidget, layered=force advanced (may error)",
-  "overlay_debug_bg": false,
+  "overlay_debug_bg": true,
   "_overlay_debug_bg_note": "If true draws semi-transparent dark background so you can verify overlay is visible",
-  "ignore_past_responses_seconds": 120,
+  "ignore_past_responses_seconds": 60,
   "_ignore_past_responses_seconds_note": "Ignore Firestore responses older than this many seconds before helper start to prevent replay"
 }

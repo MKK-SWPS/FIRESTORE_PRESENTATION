@@ -534,7 +534,7 @@ class DesktopHelper:
     def _on_new_response(self, response_data, slide_index):
         """Handle new tap responses from students."""
         logger.info(f"🔍 New response received: slide_index={slide_index}, current_slide_index={self.current_slide_index}")
-        logger.info(f"📍 Response data: {response_data}")
+        logger.info(f"� Response data: {response_data}")
 
         # Ignore stale responses from before startup (replay noise)
         ignore_seconds = self.config.get('ignore_past_responses_seconds', 0)
@@ -548,7 +548,7 @@ class DesktopHelper:
                 else:
                     ts_val = None
                 if ts_val and ts_val < (self.start_time - ignore_seconds):
-                    logger.debug("Ignoring old response outside freshness window")
+                    logger.info(f"🚫 Ignoring old response from {int(self.start_time - ts_val)} seconds before app start")
                     return
             except Exception:
                 pass
@@ -579,7 +579,10 @@ class DesktopHelper:
             logger.error("❌ Overlay is None - cannot add dot!")
         
         logger.debug(f"Added dot at ({abs_x}, {abs_y}) from normalized ({x:.3f}, {y:.3f})")
-    
+        self.overlay.raise_()
+        self.overlay.show()
+        self.overlay.activateWindow()
+
     def _setup_overlay(self):
         """Create and show the overlay window (mode: auto/layered/simple)."""
         try:
