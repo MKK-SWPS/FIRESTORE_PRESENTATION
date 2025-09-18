@@ -33,43 +33,36 @@ class ScreenshotHTTPServer:
                     
                     # Send success response
                     self.send_response(200)
-                    self.send_header('Content-type', 'text/html')
+                    self.send_header('Content-type', 'text/html; charset=utf-8')
                     self.send_header('Cache-Control', 'no-cache')
                     self.end_headers()
                     
-                    response = """
-                    <!DOCTYPE html>
-                    <html>
-                    <head>
-                        <title>Screenshot Trigger</title>
-                        <meta name="viewport" content="width=device-width, initial-scale=1">
-                        <style>
-                            body { font-family: Arial; text-align: center; padding: 50px; background: #2E3440; color: white; }
-                            .button { background: #5E81AC; color: white; border: none; padding: 20px 40px; font-size: 18px; border-radius: 8px; cursor: pointer; margin: 10px; }
-                            .button:hover { background: #81A1C1; }
-                            .success { color: #A3BE8C; font-size: 24px; margin: 20px; }
-                        </style>
-                    </head>
-                    <body>
-                        <h1>Screenshot Captured! ✅</h1>
-                        <p class="success">Screenshot has been taken and uploaded to Firebase</p>
-                        <button class="button" onclick="location.reload()">Capture Another</button>
-                        <hr style="margin: 40px 0; border-color: #4C566A;">
-                        <h3>Bookmark This Page!</h3>
-                        <p>Add this to your browser bookmarks for quick access:<br>
-                        <strong>http://localhost:{}</strong></p>
-                        <p><small>Keep this window open while presenting</small></p>
-                    </body>
-                    </html>
-                    """.format(self.server.server_address[1])
+                    # Simple HTML response without complex styling that might cause parsing issues
+                    port = self.server.server_address[1]
+                    response_html = f"""<!DOCTYPE html>
+<html>
+<head>
+    <title>Screenshot Captured</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+</head>
+<body style="background: #2E3440; color: white; text-align: center; padding: 50px;">
+    <h1>Screenshot Captured Successfully!</h1>
+    <p style="color: #A3BE8C; font-size: 24px;">Screenshot uploaded to Firebase</p>
+    <button onclick="location.reload()" style="background: #5E81AC; color: white; border: none; padding: 15px 30px; font-size: 16px; cursor: pointer;">Capture Another</button>
+    <hr style="margin: 40px 0; border-color: #4C566A;">
+    <h3>Bookmark This Page</h3>
+    <p>Quick access: <strong>http://localhost:{port}</strong></p>
+</body>
+</html>"""
                     
-                    self.wfile.write(response.encode())
+                    self.wfile.write(response_html.encode('utf-8'))
                     
                 except Exception as e:
                     logger.error(f"HTTP trigger error: {e}")
-                    self.send_error(500, f"Screenshot failed: {e}")
+                    self.send_error(500, f"Screenshot capture failed: {str(e)}")
             else:
-                self.send_error(404, "Use /capture or / to trigger screenshot")
+                self.send_error(404, "Use / to trigger screenshot capture")
                 
         def log_message(self, format, *args):
             # Reduce HTTP server logging noise

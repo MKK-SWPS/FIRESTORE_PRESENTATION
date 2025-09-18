@@ -380,35 +380,32 @@ class DesktopHelper:
             
             # Convert to PIL Image for saving
             from PIL import Image
-            import numpy as np
             
             try:
                 # Method 1: Try direct BGRX conversion
                 img = Image.frombytes("RGB", screenshot.size, screenshot.bgra, "BGRX")
-            except ValueError as e:
-                logger.warning(f"BGRX conversion failed ({e}), trying alternative method...")
+                logger.info("✅ Screenshot captured using BGRX method")
+            except (ValueError, OSError) as e:
+                logger.warning(f"BGRX conversion failed ({e}), trying manual method...")
                 try:
-                    # Method 2: Convert BGRA to RGB manually
-                    import array
+                    # Method 2: Manual BGRA to RGB conversion (no numpy needed)
                     bgra_data = screenshot.bgra
-                    rgba_data = array.array('B')
+                    rgb_data = bytearray()
                     
-                    # Convert BGRA to RGBA
+                    # Convert BGRA to RGB manually
                     for i in range(0, len(bgra_data), 4):
                         b, g, r, a = bgra_data[i:i+4]
-                        rgba_data.extend([r, g, b])  # RGB, skip alpha
+                        rgb_data.extend([r, g, b])  # RGB, skip alpha
                     
-                    img = Image.frombytes("RGB", screenshot.size, rgba_data.tobytes())
+                    img = Image.frombytes("RGB", screenshot.size, bytes(rgb_data))
+                    logger.info("✅ Screenshot captured using manual conversion")
                 except Exception as e2:
-                    logger.warning(f"Manual conversion failed ({e2}), trying numpy method...")
+                    logger.error(f"Manual conversion failed ({e2}), trying raw method...")
                     try:
-                        # Method 3: Use numpy for conversion
-                        bgra_array = np.frombuffer(screenshot.bgra, dtype=np.uint8)
-                        bgra_array = bgra_array.reshape(screenshot.height, screenshot.width, 4)
-                        
-                        # Convert BGRA to RGB
-                        rgb_array = bgra_array[:, :, [2, 1, 0]]  # B,G,R,A -> R,G,B
-                        img = Image.fromarray(rgb_array, mode='RGB')
+                        # Method 3: Try different PIL modes
+                        img = Image.frombytes("RGBA", screenshot.size, screenshot.bgra)
+                        img = img.convert("RGB")  # Convert RGBA to RGB
+                        logger.info("✅ Screenshot captured using RGBA conversion")
                     except Exception as e3:
                         logger.error(f"All conversion methods failed: {e3}")
                         return None, None

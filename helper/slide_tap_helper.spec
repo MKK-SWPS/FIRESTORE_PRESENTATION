@@ -51,6 +51,9 @@ a = Analysis(
         'PIL',
         'PIL.Image',
         'PIL.ImageGrab',
+        'PIL._imaging',
+        'PIL._imagingtk',
+        'Pillow',
         
         # Standard library that PyInstaller might miss
         'json',
