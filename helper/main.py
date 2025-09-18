@@ -512,10 +512,42 @@ class DesktopHelper:
 
 def main():
     """Main entry point."""
-    if len(sys.argv) > 1:
-        config_path = sys.argv[1]
-    else:
-        config_path = 'config.json'
+    import argparse
+    
+    parser = argparse.ArgumentParser(
+        description="Desktop Helper for Student Tap Interactive Presentation System",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  slide_tap_helper.exe                  # Use config.json
+  slide_tap_helper.exe custom.json      # Use custom config file
+
+Requirements:
+  - Windows 10/11
+  - Firebase project with Firestore and Storage enabled
+  - Service account JSON file
+  - config.json with session and Firebase settings
+
+For setup instructions, see: https://github.com/MKK-SWPS/FIRESTORE_PRESENTATION
+        """
+    )
+    
+    parser.add_argument(
+        'config', 
+        nargs='?', 
+        default='config.json',
+        help='Path to configuration JSON file (default: config.json)'
+    )
+    
+    parser.add_argument(
+        '--version', 
+        action='version',
+        version=f"Slide Tap Helper v{VERSION_INFO.get('version', 'unknown')} (built {VERSION_INFO.get('build_date', 'unknown')})"
+    )
+    
+    # Parse arguments
+    args = parser.parse_args()
+    config_path = args.config
     
     try:
         helper = DesktopHelper(config_path)
