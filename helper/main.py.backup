@@ -35,11 +35,47 @@ from datetime import datetime
 from pathlib import Path
 import logging
 
+# Version     def _cleanup(self):
+        \"\"\"Clean up resources.\"\"\"
+        logger.info(\"Cleaning up...\")
+        
+        # Stop message timer
+        if hasattr(self, 'message_timer') and self.message_timer:
+            self.message_timer.stop()
+        
+        if self.hotkey_manager:
+            self.hotkey_manager.unregister_hotkey()
+        
+        if self.firestore_watcher:
+            self.firestore_watcher.stop()
+            self.firestore_watcher.wait(5000)  # Wait up to 5 seconds
+        
+        if self.overlay:
+            self.overlay.close()iled executable
+try:
+    from version_info import VERSION_INFO
+except ImportError:
+    VERSION_INFO = {
+        'version': 'dev',
+        'build_date': 'unknown',
+        'commit': 'unknown',
+        'branch': 'unknown'
+    }
+
+import json
+import os
+import sys
+import time
+import threading
+from datetime import datetime
+from pathlib import Path
+import logging
+
 # Windows-specific imports
 import win32gui
 import win32con
 import win32api
-from ctypes import windll, wintypes, c_int, c_bool, byref
+from ctypes import windll, wintypes, c_int, byref
 
 # Firebase imports
 import firebase_admin
@@ -57,7 +93,6 @@ from PySide6.QtGui import QPixmap
 
 # Local imports
 from overlay import OverlayWindow
-from alternative_triggers import ScreenshotHTTPServer, FileWatcherTrigger
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -152,29 +187,23 @@ class HotkeyManager:
         self.hotkey_id = 1
         self.callback = None
         self.hwnd = None
-        self.hotkey_registered = False
         self._setup_message_window()
     
     def _setup_message_window(self):
         """Create a hidden window to receive hotkey messages."""
-        try:
-            # Create a simple window class
-            wc = win32gui.WNDCLASS()
-            wc.lpfnWndProc = self._wnd_proc
-            wc.lpszClassName = "HotkeyManagerWindow"
-            wc.hInstance = win32gui.GetModuleHandle(None)
-            
-            class_atom = win32gui.RegisterClass(wc)
-            
-            # Create the window
-            self.hwnd = win32gui.CreateWindow(
-                class_atom, "Hotkey Manager", 0, 0, 0, 0, 0,
-                None, None, win32gui.GetModuleHandle(None), None
-            )
-            logger.info(f"Created message window for hotkeys: HWND={self.hwnd}")
-        except Exception as e:
-            logger.error(f"Failed to create message window: {e}")
-            self.hwnd = None
+        # Create a simple window class
+        wc = win32gui.WNDCLASS()
+        wc.lpfnWndProc = self._wnd_proc
+        wc.lpszClassName = "HotkeyManagerWindow"
+        wc.hInstance = win32gui.GetModuleHandle(None)
+        
+        class_atom = win32gui.RegisterClass(wc)
+        
+        # Create the window
+        self.hwnd = win32gui.CreateWindow(
+            class_atom, "Hotkey Manager", 0, 0, 0, 0, 0,
+            None, None, win32gui.GetModuleHandle(None), None
+        )
     
     def _wnd_proc(self, hwnd, msg, wparam, lparam):
         """Window procedure to handle messages."""
@@ -184,108 +213,33 @@ class HotkeyManager:
             return 0
         return win32gui.DefWindowProc(hwnd, msg, wparam, lparam)
     
-    def register_hotkey(self, callback, key=None, modifiers=None):
+    def register_hotkey(self, callback, key=VK_B, modifiers=MOD_CONTROL):
         """Register a global hotkey."""
-        if not self.hwnd:
-            logger.error("Cannot register hotkey: no message window")
-            return False
-            
-        if key is None:
-            key = self.VK_B
-        if modifiers is None:
-            modifiers = self.MOD_CONTROL
-            
         self.callback = callback
         
-        try:
-            # Try different approaches for Windows API
-            import ctypes
-            from ctypes import wintypes
-            
-            # Method 1: Direct RegisterHotKey (most compatible)
-            try:
-                user32 = ctypes.windll.user32
-                result = user32.RegisterHotKeyW(
-                    ctypes.wintypes.HWND(self.hwnd),
-                    ctypes.c_int(self.hotkey_id),
-                    ctypes.c_uint(modifiers),
-                    ctypes.c_uint(key)
-                )
-                
-                if result:
-                    self.hotkey_registered = True
-                    logger.info(f"Successfully registered global hotkey: Ctrl+B (Method 1)")
-                    return True
-                else:
-                    error_code = user32.GetLastError()
-                    logger.warning(f"Method 1 failed with error {error_code}, trying Method 2...")
-            except Exception as e1:
-                logger.warning(f"Method 1 exception: {e1}, trying Method 2...")
-            
-            # Method 2: Using win32api if available
-            try:
-                import win32api
-                import win32con
-                
-                result = win32api.RegisterHotKey(
-                    self.hwnd,
-                    self.hotkey_id, 
-                    modifiers,
-                    key
-                )
-                
-                if result:
-                    self.hotkey_registered = True
-                    logger.info(f"Successfully registered global hotkey: Ctrl+B (Method 2)")
-                    return True
-                else:
-                    logger.warning("Method 2 also failed, trying alternative keys...")
-            except Exception as e2:
-                logger.warning(f"Method 2 exception: {e2}")
-            
-            # Method 3: Try alternative key combinations
-            alternative_keys = [
-                (self.MOD_CONTROL, 0x43),  # Ctrl+C (if available)
-                (self.MOD_CONTROL, 0x53),  # Ctrl+S (if available) 
-                (self.MOD_CONTROL, 0x50),  # Ctrl+P (if available)
-                (0x0001 | 0x0002, self.VK_B),  # Alt+Ctrl+B
-            ]
-            
-            for alt_mod, alt_key in alternative_keys:
-                try:
-                    result = user32.RegisterHotKeyW(
-                        ctypes.wintypes.HWND(self.hwnd),
-                        ctypes.c_int(self.hotkey_id + 1),  # Different ID
-                        ctypes.c_uint(alt_mod),
-                        ctypes.c_uint(alt_key)
-                    )
-                    
-                    if result:
-                        self.hotkey_id += 1  # Update to the working ID
-                        self.hotkey_registered = True
-                        key_name = f"Alternative hotkey (mod:{alt_mod}, key:{alt_key})"
-                        logger.info(f"Successfully registered {key_name}")
-                        return True
-                except Exception as e3:
-                    continue
-            
-            logger.error("All hotkey registration methods failed")
-            return False
-            
-        except Exception as e:
-            logger.error(f"Fatal exception in hotkey registration: {e}")
-            return False
+        if not windll.user32.RegisterHotKeyW(self.hwnd, self.hotkey_id, modifiers, key):
+            raise Exception(f"Failed to register hotkey. Error: {win32api.GetLastError()}")
+        
+        logger.info(f"Registered global hotkey: Ctrl+B")
     
     def unregister_hotkey(self):
         """Unregister the hotkey."""
-        if self.hwnd and self.hotkey_registered:
-            try:
-                from ctypes import windll
-                windll.user32.UnregisterHotKeyW(self.hwnd, self.hotkey_id)
-                self.hotkey_registered = False
-                logger.info("Hotkey unregistered successfully")
-            except Exception as e:
-                logger.error(f"Error unregistering hotkey: {e}")
+        if self.hwnd:
+            windll.user32.UnregisterHotKeyW(self.hwnd, self.hotkey_id)
+    
+    def pump_messages(self):
+        """Pump messages to handle hotkey events."""
+        msg = wintypes.MSG()
+        while True:
+            result = windll.user32.GetMessageW(byref(msg), None, 0, 0)
+            if result == 0:  # WM_QUIT
+                break
+            elif result == -1:  # Error
+                logger.error("Message pump error")
+                break
+            else:
+                windll.user32.TranslateMessage(byref(msg))
+                windll.user32.DispatchMessageW(byref(msg))
 
 
 class DesktopHelper:
@@ -304,10 +258,6 @@ class DesktopHelper:
         self.overlay = None
         self.hotkey_manager = HotkeyManager()
         self.firestore_watcher = None
-        
-        # Alternative triggers
-        self.http_server = None
-        self.file_watcher = None
         
         # State
         self.monitors = screeninfo.get_monitors()
@@ -536,97 +486,30 @@ class DesktopHelper:
         self.firestore_watcher.start()
         logger.info("Started Firestore watchers")
     
-    def _setup_alternative_triggers(self):
-        """Setup alternative screenshot triggers."""
-        # Setup HTTP server trigger
-        http_port = self.config.get('http_trigger_port', 8889)
-        self.http_server = ScreenshotHTTPServer(port=http_port, callback=self._on_hotkey_pressed)
-        self.http_server.start()
-        
-        # Setup file watcher trigger
-        trigger_file = self.config.get('trigger_file', 'capture_now.txt')
-        self.file_watcher = FileWatcherTrigger(trigger_file=trigger_file, callback=self._on_hotkey_pressed)
-        self.file_watcher.start()
-    
     def run(self):
-        """Start the desktop helper application."""
+        \"\"\"Start the desktop helper application.\"\"\"
         try:
-            logger.info("Starting Desktop Helper...")
-            logger.info(f"Version: {VERSION_INFO.get('version', 'unknown')}")
-            logger.info(f"Session ID: {self.config['session_id']}")
-            logger.info(f"Monitor: {self.config['monitor_index']}")
+            logger.info(\"Starting Desktop Helper...\")
+            logger.info(f\"Version: {VERSION_INFO.get('version', 'unknown')}\")
+            logger.info(f\"Session ID: {self.config['session_id']}\")
+            logger.info(f\"Monitor: {self.config['monitor_index']}\")
             
             # Setup components
             self._setup_overlay()
             self._setup_firestore_watcher()
             
-            # Register hotkey (with fallback if it fails)
-            hotkey_success = self.hotkey_manager.register_hotkey(self._on_hotkey_pressed)
+            # Register hotkey
+            self.hotkey_manager.register_hotkey(self._on_hotkey_pressed)
+            logger.info(\"Press Ctrl+B to capture screenshot\")
             
-            # Setup alternative triggers
-            self._setup_alternative_triggers()
-            
-            if hotkey_success:
-                logger.info("✅ Global hotkey registered successfully")
-            else:
-                logger.warning("⚠️ Hotkey registration failed - using alternative triggers")
-            
-            logger.info("📸 Screenshot triggers available:")
-            if hotkey_success:
-                logger.info("  • Press Ctrl+B (or alternative hotkey)")
-            logger.info("  • Visit: http://localhost:8889 in your browser") 
-            logger.info("  • Create file: capture_now.txt in this directory")
-            
-            # Create a timer to handle Windows messages for hotkeys
-            self.message_timer = QTimer()
-            self.message_timer.timeout.connect(self._pump_messages)
-            self.message_timer.start(10)  # Check every 10ms
-            
-            # Start Qt event loop
-            return self.app.exec()
-            
-        except KeyboardInterrupt:
-            logger.info("Interrupted by user")
-            return 0
-        except Exception as e:
-            logger.error(f"Fatal error: {e}")
-            return 1
-        finally:
-            self._cleanup()
-    
-    def _pump_messages(self):
-        """Pump Windows messages in a thread-safe way."""        
-        try:
-            # This needs to be called from the main thread
-            import win32gui
-            import ctypes
-            from ctypes import wintypes
-            
-            msg = wintypes.MSG()
-            bRet = ctypes.windll.user32.PeekMessageW(ctypes.byref(msg), None, 0, 0, 1)  # PM_REMOVE
-            if bRet != 0:  # Message available
-                ctypes.windll.user32.TranslateMessage(ctypes.byref(msg))
-                ctypes.windll.user32.DispatchMessageW(ctypes.byref(msg))
-        except Exception as e:
-            # Don't spam the logs with message pump errors
-            pass
+            # Create a timer to handle Windows messages for hotkeys\n            self.message_timer = QTimer()\n            self.message_timer.timeout.connect(self._pump_messages)\n            self.message_timer.start(10)  # Check every 10ms\n            \n            # Start Qt event loop\n            return self.app.exec()\n            \n        except KeyboardInterrupt:\n            logger.info(\"Interrupted by user\")\n            return 0\n        except Exception as e:\n            logger.error(f\"Fatal error: {e}\")\n            return 1\n        finally:\n            self._cleanup()\n    \n    def _pump_messages(self):\n        \"\"\"Pump Windows messages in a thread-safe way.\"\"\"        \n        try:\n            # This needs to be called from the main thread\n            import win32gui\n            import ctypes\n            from ctypes import wintypes\n            \n            msg = wintypes.MSG()\n            bRet = ctypes.windll.user32.PeekMessageW(ctypes.byref(msg), None, 0, 0, 1)  # PM_REMOVE\n            if bRet != 0:  # Message available\n                ctypes.windll.user32.TranslateMessage(ctypes.byref(msg))\n                ctypes.windll.user32.DispatchMessageW(ctypes.byref(msg))\n        except Exception as e:\n            # Don't spam the logs with message pump errors\n            pass
     
     def _cleanup(self):
         """Clean up resources."""
         logger.info("Cleaning up...")
         
-        # Stop message timer
-        if hasattr(self, 'message_timer') and self.message_timer:
-            self.message_timer.stop()
-        
         if self.hotkey_manager:
             self.hotkey_manager.unregister_hotkey()
-        
-        if self.http_server:
-            self.http_server.stop()
-            
-        if self.file_watcher:
-            self.file_watcher.stop()
         
         if self.firestore_watcher:
             self.firestore_watcher.stop()
@@ -638,42 +521,10 @@ class DesktopHelper:
 
 def main():
     """Main entry point."""
-    import argparse
-    
-    parser = argparse.ArgumentParser(
-        description="Desktop Helper for Student Tap Interactive Presentation System",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-Examples:
-  slide_tap_helper.exe                  # Use config.json
-  slide_tap_helper.exe custom.json      # Use custom config file
-
-Requirements:
-  - Windows 10/11
-  - Firebase project with Firestore and Storage enabled
-  - Service account JSON file
-  - config.json with session and Firebase settings
-
-For setup instructions, see: https://github.com/MKK-SWPS/FIRESTORE_PRESENTATION
-        """
-    )
-    
-    parser.add_argument(
-        'config', 
-        nargs='?', 
-        default='config.json',
-        help='Path to configuration JSON file (default: config.json)'
-    )
-    
-    parser.add_argument(
-        '--version', 
-        action='version',
-        version=f"Slide Tap Helper v{VERSION_INFO.get('version', 'unknown')} (built {VERSION_INFO.get('build_date', 'unknown')})"
-    )
-    
-    # Parse arguments
-    args = parser.parse_args()
-    config_path = args.config
+    if len(sys.argv) > 1:
+        config_path = sys.argv[1]
+    else:
+        config_path = 'config.json'
     
     try:
         helper = DesktopHelper(config_path)
