@@ -64,7 +64,7 @@ from PySide6.QtCore import QTimer, QThread, Signal
 from PySide6.QtGui import QPixmap
 
 # Local imports
-from overlay import OverlayWindow
+# Overlay classes are imported lazily inside _setup_overlay to allow platform-specific selection
 from alternative_triggers import ScreenshotHTTPServer, FileWatcherTrigger
 
 # Configure logging
@@ -301,6 +301,8 @@ class DesktopHelper:
     
     def __init__(self, config_path='config.json'):
         self.config = self._load_config(config_path)
+        # Track startup time to ignore stale Firestore responses
+        self.start_time = time.time()
         self.app = QApplication(sys.argv)
         
         # Firebase setup
@@ -533,6 +535,23 @@ class DesktopHelper:
         """Handle new tap responses from students."""
         logger.info(f"🔍 New response received: slide_index={slide_index}, current_slide_index={self.current_slide_index}")
         logger.info(f"📍 Response data: {response_data}")
+
+        # Ignore stale responses from before startup (replay noise)
+        ignore_seconds = self.config.get('ignore_past_responses_seconds', 0)
+        if ignore_seconds > 0:
+            ts = response_data.get('timestamp')
+            try:
+                if hasattr(ts, 'timestamp'):
+                    ts_val = ts.timestamp()
+                elif isinstance(ts, (int, float)):
+                    ts_val = float(ts)
+                else:
+                    ts_val = None
+                if ts_val and ts_val < (self.start_time - ignore_seconds):
+                    logger.debug("Ignoring old response outside freshness window")
+                    return
+            except Exception:
+                pass
         
         if slide_index != self.current_slide_index:
             # Response is for a different slide, ignore
@@ -562,41 +581,51 @@ class DesktopHelper:
         logger.debug(f"Added dot at ({abs_x}, {abs_y}) from normalized ({x:.3f}, {y:.3f})")
     
     def _setup_overlay(self):
-        """Create and show the overlay window."""
+        """Create and show the overlay window (mode: auto/layered/simple)."""
         try:
             import platform
-            
-            if platform.system() == "Windows":
-                # Use Windows-specific overlay
-                from overlay import OverlayWindow, FallbackOverlayWindow
-                
-                monitor, monitor_index = self._get_monitor_info()
-                
-                # Try the main overlay first
+            mode = self.config.get('overlay_mode', 'auto')
+            debug_bg = self.config.get('overlay_debug_bg', False)
+            monitor, monitor_index = self._get_monitor_info()
+            if platform.system() == 'Windows':
+                from overlay import OverlayWindow, SimpleOverlayWindow
+                def build_layered():
+                    return OverlayWindow(monitor.x, monitor.y, monitor.width, monitor.height,
+                                         self.config.get('dot_color', '#8E4EC6'),
+                                         self.config.get('dot_radius_px', 8),
+                                         self.config.get('fade_ms', 10000), debug_bg=debug_bg)
+                def build_simple():
+                    return SimpleOverlayWindow(monitor.x, monitor.y, monitor.width, monitor.height,
+                                               self.config.get('dot_color', '#8E4EC6'),
+                                               self.config.get('dot_radius_px', 8),
+                                               self.config.get('fade_ms', 10000), debug_bg=debug_bg)
+                if mode == 'simple':
+                    self.overlay = build_simple()
+                elif mode == 'layered':
+                    self.overlay = build_layered()
+                else:
+                    try:
+                        self.overlay = build_layered()
+                        logger.info('Layered overlay succeeded (auto)')
+                    except Exception as e:
+                        logger.warning(f'Layered overlay failed: {e}; using simple overlay')
+                        self.overlay = build_simple()
+                self.overlay.show()
+                # Ensure any residual state is cleared (should be empty on new instance)
                 try:
-                    self.overlay = OverlayWindow(
-                        monitor.x, monitor.y, monitor.width, monitor.height,
-                        self.config.get('dot_color', '#8E4EC6'),
-                        self.config.get('dot_radius_px', 8),
-                        self.config.get('fade_ms', 10000)
-                    )
-                    self.overlay.show()
-                    logger.info(f"✅ Main overlay window created on monitor {monitor_index}")
-                    
-                except Exception as e:
-                    logger.warning(f"Main overlay failed: {e}, trying fallback...")
-                    
-                    # Fallback to the simpler overlay approach
-                    self.overlay = FallbackOverlayWindow()
-                    self.overlay.show()
-                    logger.info(f"✅ Fallback overlay window created")
+                    self.overlay.clear_dots()
+                except Exception:
+                    pass
+                logger.info(f"✅ Overlay window created on monitor {monitor_index} mode={mode}")
             else:
-                # Use Linux-compatible overlay for testing
                 from overlay_linux import LinuxOverlayWindow
                 self.overlay = LinuxOverlayWindow()
                 self.overlay.show()
-                logger.info(f"✅ Linux overlay window created for testing")
-                
+                try:
+                    self.overlay.clear_dots()
+                except Exception:
+                    pass
+                logger.info('✅ Linux overlay window created for testing')
         except Exception as e:
             logger.error(f"❌ Failed to create any overlay: {e}")
             self.overlay = None
@@ -637,16 +666,23 @@ class DesktopHelper:
             self._setup_overlay()
             self._setup_firestore_watcher()
             
-            # Register hotkey (with fallback if it fails)
-            hotkey_success = self.hotkey_manager.register_hotkey(self._on_hotkey_pressed)
+            # Register hotkey if enabled
+            hotkey_success = False
+            if self.config.get('enable_hotkey', False):
+                try:
+                    hotkey_success = self.hotkey_manager.register_hotkey(self._on_hotkey_pressed)
+                except Exception as e:
+                    logger.debug(f"Hotkey exception: {e}")
+            else:
+                logger.info("Hotkey disabled by configuration")
             
             # Setup alternative triggers
             self._setup_alternative_triggers()
             
             if hotkey_success:
                 logger.info("✅ Global hotkey registered successfully")
-            else:
-                logger.warning("⚠️ Hotkey registration failed - using alternative triggers")
+            elif self.config.get('enable_hotkey', False):
+                logger.info("Hotkey unavailable - relying on HTTP/file triggers")
             
             logger.info("📸 Screenshot triggers available:")
             if hotkey_success:

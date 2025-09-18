@@ -40,7 +40,7 @@ pip install -r requirements.txt
 copy config.example.json config.json
 ```
 
-Edit `config.json` with your settings:
+Edit `config.json` with your settings (new advanced flags included):
 
 ```json
 {
@@ -51,19 +51,39 @@ Edit `config.json` with your settings:
   "hotkey": "ctrl+b",
   "dot_color": "#8E4EC6",
   "dot_radius_px": 8,
-  "fade_ms": 10000
+  "fade_ms": 10000,
+  "enable_hotkey": false,
+  "overlay_mode": "auto",
+  "overlay_debug_bg": false,
+  "ignore_past_responses_seconds": 120,
+  "http_trigger_port": 8889,
+  "trigger_file": "capture_now.txt"
 }
 ```
 
-**Configuration fields:**
-- `session_id`: Unique ID for this presentation (students will use the same ID)
+**Core fields:**
+- `session_id`: Unique ID for this presentation (students use the same ID)
 - `service_account_path`: Path to your Firebase service account JSON file
-- `storage_bucket`: Your Firebase Storage bucket (usually `project-id.appspot.com`)
-- `monitor_index`: Which monitor to capture (0 = primary, 1 = secondary, etc.)
-- `hotkey`: Global hotkey (currently only "ctrl+b" is supported)
-- `dot_color`: Color of student tap dots in hex format
-- `dot_radius_px`: Size of tap dots in pixels
-- `fade_ms`: How long dots stay visible (10000 = 10 seconds)
+- `storage_bucket`: Firebase Storage bucket (e.g. `project-id.appspot.com` or `.firebasestorage.app`)
+- `monitor_index`: Which monitor to capture (0 = primary)
+- `hotkey`: Display-only right now (Ctrl+B); actual enable controlled by `enable_hotkey`
+- `dot_color`, `dot_radius_px`, `fade_ms`: Visual behavior of tap dots
+
+**New reliability / debugging fields:**
+- `enable_hotkey` (bool): If false, skips global hotkey registration entirely (removes repeated failure spam). Use HTTP / file triggers instead.
+- `overlay_mode` (auto | simple | layered):
+  - `auto` (default) tries advanced layered transparent window; falls back to simple QWidget if it fails
+  - `simple` always uses a standard top‑most window (most reliable, shows a window border only in debug background mode)
+  - `layered` forces layered mode (might produce Windows UpdateLayeredWindow errors on some GPUs / RDP)
+- `overlay_debug_bg` (bool): When true draws a faint dark translucent background so you can visually confirm the overlay exists (useful if dots seem invisible).
+- `ignore_past_responses_seconds`: Ignores any Firestore tap responses older than this many seconds before helper startup (prevents replay flood after restarts). Set to 0 to disable.
+- `http_trigger_port`: Local HTTP endpoint to trigger a screenshot (GET http://localhost:PORT)
+- `trigger_file`: Touch/create this file to trigger a screenshot (the helper deletes it afterwards)
+
+With `enable_hotkey=false` you can still capture new slides by either:
+1. Opening http://localhost:8889 (or your chosen port) in a browser
+2. Creating an empty file named `capture_now.txt` (default) in the helper folder
+3. (Optional future) Re‑enabling the hotkey once stable
 
 ## Running the Helper
 
@@ -88,7 +108,15 @@ python main.py
 2. Registers global hotkey (Ctrl+B) that works even when other apps have focus
 3. Connects to Firestore to monitor session changes and student responses
 
-### Taking a Screenshot (Ctrl+B)
+### Taking a Screenshot (Hotkey OR Alternative Trigger)
+When `enable_hotkey=true` and registration succeeds:
+1. Press Ctrl+B
+
+If hotkey is disabled or fails you can instead:
+1. Visit `http://localhost:8889` in any browser on the same machine, OR
+2. Create/touch the file `capture_now.txt` (default name) in the helper directory
+
+In all cases the helper then:
 1. Captures the current screen of your selected monitor
 2. Uploads image to Firebase Storage
 3. Updates Firestore with the new slide URL and index
@@ -101,17 +129,21 @@ python main.py
 4. Dots gradually fade out over the configured time period
 
 ### Overlay Window
-- **Always on top**: Visible over all other applications
-- **Click-through**: Mouse and keyboard events pass through to underlying apps
-- **Transparent**: Only the purple dots are visible
-- **Monitor-aware**: Correctly handles multiple monitors and DPI scaling
+Behavior depends on `overlay_mode`:
+- `layered` / layered attempt in `auto`: Transparent & click‑through (ideal) but may fail on some systems (drivers / RDP) producing UpdateLayeredWindow errors
+- `simple`: Standard top‑most window; most reliable; not click‑through (so you may need to move it if it blocks interaction). Use during debugging.
+
+General properties:
+- Always on top
+- Dots fade over `fade_ms`
+- Optional debug background (enable `overlay_debug_bg`) to verify geometry
 
 ## Troubleshooting
 
 ### "Failed to register hotkey"
+- Set `enable_hotkey` to `false` to silence these entirely and rely on HTTP/file triggers
 - Another application might be using Ctrl+B
-- Try closing other presentation software or screen capture tools
-- Some antivirus software may block hotkey registration
+- Some antivirus / corporate lockdown policies block global hotkeys
 
 ### "Screenshot capture failed"
 - Check that `monitor_index` in config.json matches your setup
@@ -128,10 +160,14 @@ python main.py
 - Press Ctrl+B to capture a fresh screenshot and reset alignment
 - Ensure students are viewing the latest slide (check slide counter)
 
-### Overlay not visible or clickable
-- Check Windows display scaling settings
-- Try running as Administrator if overlay doesn't appear
-- Verify that Windows hasn't disabled layered windows
+### Overlay not visible / no dots
+- Temporarily set `overlay_debug_bg` to `true` to ensure the window exists
+- Switch `overlay_mode` to `simple` to rule out layered transparency issues
+- Confirm Firestore shows new responses for the current slide index
+
+### Overlay not click-through
+- You're probably in `simple` mode; switch to `overlay_mode=auto` or `layered`
+- If layered errors spam logs, revert to `simple` for reliability
 
 ## Development
 

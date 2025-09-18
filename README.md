@@ -277,15 +277,26 @@ build.bat  # Windows
 - `FIREBASE_CONFIG`: Firebase project configuration object
 - `SESSION_ID`: Unique session identifier (must match helper config)
 
-### Helper Configuration
+### Helper Configuration (key fields)
 - `session_id`: Session identifier (matches student page)
 - `service_account_path`: Path to Firebase Admin SDK JSON file
 - `storage_bucket`: Firebase Storage bucket name
 - `monitor_index`: Which monitor to capture (0 = primary)
-- `hotkey`: Global hotkey combination (currently only "ctrl+b")
 - `dot_color`: Hex color for tap dots (e.g., "#8E4EC6")
 - `dot_radius_px`: Dot size in pixels
 - `fade_ms`: Dot fade duration in milliseconds
+
+### New reliability / debugging options
+- `enable_hotkey` (bool): If false, skip global hotkey registration entirely (use HTTP/file triggers)
+- `overlay_mode` (auto | simple | layered): Select overlay strategy. `auto` tries layered then falls back to simple.
+- `overlay_debug_bg` (bool): Draws translucent dark background to visually confirm overlay presence.
+- `ignore_past_responses_seconds`: Ignore stale Firestore responses older than this many seconds before startup (prevents replay spam after restart).
+- `http_trigger_port`: Port for HTTP screenshot trigger (GET /)
+- `trigger_file`: Filename to create/touch to trigger screenshot capture.
+
+You can always capture without the hotkey by either:
+1. Visiting http://localhost:8889 (default port) in a browser
+2. Creating an empty file named `capture_now.txt` in the helper folder
 
 ## 🚨 Important Security Notes
 

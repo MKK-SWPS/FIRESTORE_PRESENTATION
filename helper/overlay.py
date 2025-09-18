@@ -40,36 +40,7 @@ else:
 logger = logging.getLogger(__name__)
 
 
-class TapDot:
-    """Represents a single tap dot with position, color, and fade timing."""
-    
-    def __init__(self, x: int, y: int, color: QColor, radius: int, fade_ms: int):
-        self.x = x
-        self.y = y
-        self.color = color
-        self.radius = radius
-        self.fade_ms = fade_ms
-        self.created_time = time.time() * 1000  # milliseconds
-        
-    def get_alpha(self) -> float:
-        """Get current alpha value based on fade timing (0.0 to 1.0)."""
-        if self.fade_ms <= 0:
-            return 1.0  # No fade
-        
-        current_time = time.time() * 1000
-        elapsed = current_time - self.created_time
-        
-        if elapsed >= self.fade_ms:
-            return 0.0  # Fully faded
-        
-        # Smooth fade out using cosine
-        fade_progress = elapsed / self.fade_ms
-        alpha = (math.cos(fade_progress * math.pi) + 1) / 2
-        return alpha
-    
-    def is_expired(self) -> bool:
-        """Check if the dot should be removed."""
-        return self.get_alpha() <= 0.0
+## Removed TapDot class – using simple (x, y, timestamp) tuples now
 
 
 class OverlayWindow(QWidget):
@@ -83,13 +54,15 @@ class OverlayWindow(QWidget):
     """
     
     def __init__(self, x: int, y: int, width: int, height: int, 
-                 dot_color: str = '#8E4EC6', dot_radius: int = 8, fade_ms: int = 10000):
+                 dot_color: str = '#8E4EC6', dot_radius: int = 8, fade_ms: int = 10000,
+                 debug_bg: bool = False):
         super().__init__()
         
         # Configuration
         self.dot_color = QColor(dot_color)
         self.dot_radius = dot_radius
         self.fade_ms = fade_ms
+        self.debug_bg = debug_bg
         
         # Simple dot storage: list of (x, y, timestamp) tuples
         self.dots = []
@@ -103,9 +76,14 @@ class OverlayWindow(QWidget):
         # Timer for updating dots and repainting
         self.update_timer = QTimer()
         self.update_timer.timeout.connect(self._cleanup_dots)
-        self.update_timer.start(100)  # Update every 100ms
+        self.update_timer.start(120)  # Slightly slower to reduce CPU
         
         logger.info(f"Overlay window created: {width}x{height} at ({x}, {y})")
+
+class SimpleOverlayWindow(OverlayWindow):
+    """Simpler non-layered overlay (fallback). Inherits logic but skips transparency calls."""
+    def _apply_transparency_and_click_through(self):
+        logger.info("Simple overlay: skipping layered transparency (non click-through)")
     
     def _setup_window(self, x: int, y: int, width: int, height: int):
         """Configure the basic window properties."""
@@ -154,7 +132,8 @@ class OverlayWindow(QWidget):
             result = win32gui.SetWindowLong(hwnd, win32con.GWL_EXSTYLE, new_style)
             
             if result == 0:
-                logger.warning("SetWindowLong may have failed, but continuing...")
+                # Some systems return 0 even on success; downgrade to debug
+                logger.debug("SetWindowLong returned 0 (possibly benign)")
             
             # Try different approaches for layered window attributes
             try:
@@ -163,7 +142,7 @@ class OverlayWindow(QWidget):
                 if result:
                     logger.info("Applied transparency using SetLayeredWindowAttributes")
                 else:
-                    logger.warning("SetLayeredWindowAttributes returned 0, trying alternative...")
+                    logger.debug("Primary SetLayeredWindowAttributes returned 0, trying alternative alpha...")
                     
                     # Method 2: Try with different parameters
                     result2 = windll.user32.SetLayeredWindowAttributes(hwnd, 0, 200, win32con.LWA_ALPHA)
@@ -248,9 +227,12 @@ class OverlayWindow(QWidget):
             # Enable anti-aliasing
             painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
             
-            # Clear the background
-            painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_Clear)
-            painter.fillRect(self.rect(), QColor(0, 0, 0, 0))
+            # Clear / debug background
+            painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_Source)
+            if self.debug_bg:
+                painter.fillRect(self.rect(), QColor(20, 20, 20, 60))
+            else:
+                painter.fillRect(self.rect(), QColor(0, 0, 0, 1))  # Practically transparent
             painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceOver)
             
             current_time = time.time()
@@ -281,8 +263,7 @@ class OverlayWindow(QWidget):
             painter.end()
         
         # Update the display if dots exist
-        if self.dots:
-            QTimer.singleShot(50, self.update)
+        # Do not schedule recursive update; timer drives repaint
     
     def mousePressEvent(self, event):
         """Override mouse events to ensure they don't interfere."""
