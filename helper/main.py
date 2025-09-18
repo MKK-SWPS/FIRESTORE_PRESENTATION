@@ -39,7 +39,7 @@ import logging
 import win32gui
 import win32con
 import win32api
-from ctypes import windll, wintypes, c_int, byref
+from ctypes import windll, wintypes, c_int, c_bool, byref
 
 # Firebase imports
 import firebase_admin
@@ -151,23 +151,29 @@ class HotkeyManager:
         self.hotkey_id = 1
         self.callback = None
         self.hwnd = None
+        self.hotkey_registered = False
         self._setup_message_window()
     
     def _setup_message_window(self):
         """Create a hidden window to receive hotkey messages."""
-        # Create a simple window class
-        wc = win32gui.WNDCLASS()
-        wc.lpfnWndProc = self._wnd_proc
-        wc.lpszClassName = "HotkeyManagerWindow"
-        wc.hInstance = win32gui.GetModuleHandle(None)
-        
-        class_atom = win32gui.RegisterClass(wc)
-        
-        # Create the window
-        self.hwnd = win32gui.CreateWindow(
-            class_atom, "Hotkey Manager", 0, 0, 0, 0, 0,
-            None, None, win32gui.GetModuleHandle(None), None
-        )
+        try:
+            # Create a simple window class
+            wc = win32gui.WNDCLASS()
+            wc.lpfnWndProc = self._wnd_proc
+            wc.lpszClassName = "HotkeyManagerWindow"
+            wc.hInstance = win32gui.GetModuleHandle(None)
+            
+            class_atom = win32gui.RegisterClass(wc)
+            
+            # Create the window
+            self.hwnd = win32gui.CreateWindow(
+                class_atom, "Hotkey Manager", 0, 0, 0, 0, 0,
+                None, None, win32gui.GetModuleHandle(None), None
+            )
+            logger.info(f"Created message window for hotkeys: HWND={self.hwnd}")
+        except Exception as e:
+            logger.error(f"Failed to create message window: {e}")
+            self.hwnd = None
     
     def _wnd_proc(self, hwnd, msg, wparam, lparam):
         """Window procedure to handle messages."""
@@ -179,6 +185,10 @@ class HotkeyManager:
     
     def register_hotkey(self, callback, key=None, modifiers=None):
         """Register a global hotkey."""
+        if not self.hwnd:
+            logger.error("Cannot register hotkey: no message window")
+            return False
+            
         if key is None:
             key = self.VK_B
         if modifiers is None:
@@ -186,15 +196,34 @@ class HotkeyManager:
             
         self.callback = callback
         
-        if not windll.user32.RegisterHotKeyW(self.hwnd, self.hotkey_id, modifiers, key):
-            raise Exception(f"Failed to register hotkey. Error: {win32api.GetLastError()}")
-        
-        logger.info(f"Registered global hotkey: Ctrl+B")
+        try:
+            # Use ctypes directly for better error handling
+            from ctypes import windll, c_bool
+            result = windll.user32.RegisterHotKeyW(self.hwnd, self.hotkey_id, modifiers, key)
+            
+            if not result:
+                error_code = windll.kernel32.GetLastError()
+                logger.error(f"Failed to register hotkey Ctrl+B. Error code: {error_code}")
+                return False
+            
+            self.hotkey_registered = True
+            logger.info(f"Successfully registered global hotkey: Ctrl+B")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Exception registering hotkey: {e}")
+            return False
     
     def unregister_hotkey(self):
         """Unregister the hotkey."""
-        if self.hwnd:
-            windll.user32.UnregisterHotKeyW(self.hwnd, self.hotkey_id)
+        if self.hwnd and self.hotkey_registered:
+            try:
+                from ctypes import windll
+                windll.user32.UnregisterHotKeyW(self.hwnd, self.hotkey_id)
+                self.hotkey_registered = False
+                logger.info("Hotkey unregistered successfully")
+            except Exception as e:
+                logger.error(f"Error unregistering hotkey: {e}")
 
 
 class DesktopHelper:
@@ -453,9 +482,13 @@ class DesktopHelper:
             self._setup_overlay()
             self._setup_firestore_watcher()
             
-            # Register hotkey
-            self.hotkey_manager.register_hotkey(self._on_hotkey_pressed)
-            logger.info("Press Ctrl+B to capture screenshot")
+            # Register hotkey (with fallback if it fails)
+            hotkey_success = self.hotkey_manager.register_hotkey(self._on_hotkey_pressed)
+            if hotkey_success:
+                logger.info("Press Ctrl+B to capture screenshot")
+            else:
+                logger.warning("Hotkey registration failed - you can still use the overlay to see student responses")
+                logger.info("To capture screenshots manually, you'll need to run without hotkey support")
             
             # Create a timer to handle Windows messages for hotkeys
             self.message_timer = QTimer()
