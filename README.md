@@ -1,4 +1,35 @@
-# Student Tap Interactive Presentation System
+# Student Tap Interactive Presenta### Step 1: Firebase Setup ✅ (Already Done)
+
+Your Firebase project `firestore-presentation-27ee4` is already configured! Just make sure:
+
+1. **Firestore Database** is in Native mode ✅
+2. **Storage** is enabled ✅  
+3. **Authentication** → Anonymous is enabled ✅
+4. **Add authorized domain**: Go to Authentication → Settings → Authorized domains → Add `mkk-swps.github.io`
+
+### Step 2: Deploy Security Rules
+
+Deploy the included security rules to your Firebase project:
+
+```bash
+# Install Firebase CLI if you haven't already
+npm install -g firebase-tools
+
+# Login to Firebase
+firebase login
+
+# Initialize project (choose existing project: firestore-presentation-27ee4)
+firebase init
+
+# Deploy rules
+firebase deploy --only firestore:rules,storage
+```
+
+Or manually copy the contents of `firestore.rules` and `storage.rules` to your Firebase Console → Firestore/Storage → Rules.
+
+### Step 3: Configure Student Page ✅ (Already Done)ure Authentication**:
+   - Go to Authentication → Settings → Authorized domains
+   - Add your GitHub Pages domain: `mkk-swps.github.io`m
 
 A minimal system for interactive presentations where students can tap/click on slides to send feedback points, and presenters see real-time tap locations overlaid on their screen.
 
@@ -49,27 +80,23 @@ A minimal system for interactive presentations where students can tap/click on s
 
 ### Step 2: Configure Student Page
 
-Edit `student.html` and update these constants:
+The student page is already configured with your Firebase project settings!
 
-```javascript
-const FIREBASE_CONFIG = {
-    apiKey: "your-api-key",
-    authDomain: "your-project.firebaseapp.com",
-    projectId: "your-project-id",
-    storageBucket: "your-project.appspot.com",
-    messagingSenderId: "123456789",
-    appId: "1:123456789:web:abcdef123456"
-};
+### Step 4: Deploy Student Page
 
-const SESSION_ID = "lecture-2025-09-17";  // Change this for each session
-```
+**GitHub Pages (Recommended)**:
+1. Push to GitHub (already done! ✅)
+2. Go to Settings → Pages → Source: Deploy from a branch → `main` (root)
+3. Student URL: `https://mkk-swps.github.io/FIRESTORE_PRESENTATION/student.html`
+
+**Alternative - Firebase Hosting**:
 
 ### Step 3: Deploy Student Page
 
 **Option A: GitHub Pages**
 1. Push this repository to GitHub
 2. Go to Settings → Pages → Source: Deploy from a branch → `main` (root)
-3. Student URL: `https://<username>.github.io/<repo>/student.html`
+3. Student URL: `https://mkk-swps.github.io/FIRESTORE_PRESENTATION/student.html`
 
 **Option B: Firebase Hosting**
 ```bash
@@ -79,7 +106,7 @@ firebase init hosting
 firebase deploy
 ```
 
-### Step 4: Set up Windows Helper
+### Step 5: Set up Windows Helper
 
 #### Download Pre-built Executable
 1. Go to [Actions](../../actions) tab and find the latest successful build
@@ -106,9 +133,9 @@ firebase deploy
 3. **Edit `config.json`**:
    ```json
    {
-     "session_id": "lecture-2025-09-17",
+     "session_id": "lecture-2025-09-18",
      "service_account_path": "serviceAccount.json",
-     "storage_bucket": "your-project.appspot.com",
+     "storage_bucket": "firestore-presentation-27ee4.firebasestorage.app",
      "monitor_index": 0,
      "hotkey": "ctrl+b",
      "dot_color": "#8E4EC6",

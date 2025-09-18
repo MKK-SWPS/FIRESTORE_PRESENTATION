@@ -6,13 +6,13 @@
     "Get Firebase config from Firebase Console > Project Settings"
   ],
   
-  "session_id": "lecture-2025-09-17",
+  "session_id": "lecture-2025-09-18",
   "_session_id_note": "Unique identifier for this presentation session. Students will use the same ID.",
   
   "service_account_path": "serviceAccount.json",
   "_service_account_note": "Path to Firebase service account JSON file. Download from Firebase Console > Project Settings > Service Accounts",
   
-  "storage_bucket": "your-project-id.appspot.com",
+  "storage_bucket": "firestore-presentation-27ee4.firebasestorage.app",
   "_storage_bucket_note": "Firebase Storage bucket name. Usually matches your project ID + .appspot.com",
   
   "monitor_index": 0,
