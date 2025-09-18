@@ -5,14 +5,14 @@ This provides better control over the compilation process than command line opti
 """
 
 import sys
-from pathlib import Path
+import os
 
-# Get the helper directory
-helper_dir = Path(__file__).parent
+# Get the helper directory (where this spec file is located)
+helper_dir = os.path.dirname(os.path.abspath(SPECPATH))
 
 a = Analysis(
     ['main.py'],
-    pathex=[str(helper_dir)],
+    pathex=[helper_dir],
     binaries=[],
     datas=[
         ('config.example.json', '.'),
