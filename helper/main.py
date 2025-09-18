@@ -716,6 +716,32 @@ class DesktopHelper:
 def main():
     """Main entry point."""
     import argparse
+    import sys
+    
+    # Quick check for help before creating GUI
+    if '--help' in sys.argv or '-h' in sys.argv:
+        print("Student Tap Helper - Interactive Presentation System")
+        print("Usage: slide_tap_helper.exe [config_file]")
+        print("")
+        print("Arguments:")
+        print("  config_file         Path to configuration JSON file (default: config.json)")
+        print("")
+        print("Options:")
+        print("  -h, --help          Show this help message and exit")
+        print("  --version           Show version information and exit")
+        print("")
+        print("Examples:")
+        print("  slide_tap_helper.exe                  # Use config.json")
+        print("  slide_tap_helper.exe custom.json      # Use custom config file")
+        print("")
+        print("Requirements:")
+        print("  - Windows 10/11")
+        print("  - Firebase project with Firestore and Storage enabled")
+        print("  - Service account JSON file (serviceAccount.json)")
+        print("  - config.json with session and Firebase settings")
+        print("")
+        print("For setup instructions, see: https://github.com/MKK-SWPS/FIRESTORE_PRESENTATION")
+        return 0
     
     parser = argparse.ArgumentParser(
         description="Desktop Helper for Student Tap Interactive Presentation System",

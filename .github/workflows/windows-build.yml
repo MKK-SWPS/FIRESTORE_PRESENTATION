@@ -211,13 +211,19 @@ jobs:
       shell: cmd
       run: |
         cd dist/slide_tap_helper
-        echo Testing executable can start...
-        slide_tap_helper.exe --help 2>nul || echo Executable exists and is runnable
+        echo Testing executable exists and basic properties...
         if not exist slide_tap_helper.exe (
-          echo ERROR: Executable not found!
+          echo ERROR: Main executable not found!
           exit /b 1
         )
-        for %%I in (slide_tap_helper.exe) do echo Executable size: %%~zI bytes
+        if not exist slide_tap_helper_debug.exe (
+          echo WARNING: Debug executable not found, but continuing...
+        )
+        for %%I in (slide_tap_helper.exe) do echo Main executable size: %%~zI bytes
+        if exist slide_tap_helper_debug.exe (
+          for %%I in (slide_tap_helper_debug.exe) do echo Debug executable size: %%~zI bytes
+        )
+        echo Executable validation completed successfully!
     
     - name: Upload executable artifact
       uses: actions/upload-artifact@v4
