@@ -579,58 +579,67 @@ class DesktopHelper:
             logger.error("❌ Overlay is None - cannot add dot!")
         
         logger.debug(f"Added dot at ({abs_x}, {abs_y}) from normalized ({x:.3f}, {y:.3f})")
-        self.overlay.raise_()
-        self.overlay.show()
-        self.overlay.activateWindow()
+        logger.info(f"✅ Dot added successfully! Should be visible on overlay.")
+        
+        # Ensure overlay is visible (but don't force focus in production)
+        if self.config.get('overlay_debug_bg', False):
+            self.overlay.raise_()
+            self.overlay.activateWindow()
 
     def _setup_overlay(self):
-        """Create and show the overlay window (mode: auto/layered/simple)."""
+        """Create and show the overlay window with proper transparency and emergency exit."""
         try:
             import platform
-            mode = self.config.get('overlay_mode', 'auto')
+            mode = self.config.get('overlay_mode', 'simple')  # Default to simple for safety
             debug_bg = self.config.get('overlay_debug_bg', False)
             monitor, monitor_index = self._get_monitor_info()
+            
+            # Emergency close function
+            def emergency_close():
+                if self.overlay:
+                    logger.info("🚨 Emergency close triggered - closing overlay!")
+                    self.overlay.close()
+                    self.overlay = None
+            
             if platform.system() == 'Windows':
                 from overlay import OverlayWindow, SimpleOverlayWindow
-                def build_layered():
-                    return OverlayWindow(monitor.x, monitor.y, monitor.width, monitor.height,
-                                         self.config.get('dot_color', '#8E4EC6'),
-                                         self.config.get('dot_radius_px', 8),
-                                         self.config.get('fade_ms', 10000), debug_bg=debug_bg)
-                def build_simple():
-                    return SimpleOverlayWindow(monitor.x, monitor.y, monitor.width, monitor.height,
-                                               self.config.get('dot_color', '#8E4EC6'),
-                                               self.config.get('dot_radius_px', 8),
-                                               self.config.get('fade_ms', 10000), debug_bg=debug_bg)
-                if mode == 'simple':
-                    self.overlay = build_simple()
-                elif mode == 'layered':
-                    self.overlay = build_layered()
-                else:
-                    try:
-                        self.overlay = build_layered()
-                        logger.info('Layered overlay succeeded (auto)')
-                    except Exception as e:
-                        logger.warning(f'Layered overlay failed: {e}; using simple overlay')
-                        self.overlay = build_simple()
-                self.overlay.show()
-                # Ensure any residual state is cleared (should be empty on new instance)
-                try:
-                    self.overlay.clear_dots()
-                except Exception:
-                    pass
-                logger.info(f"✅ Overlay window created on monitor {monitor_index} mode={mode}")
+                
+                # Always use simple mode for now to prevent blocking
+                self.overlay = SimpleOverlayWindow(
+                    monitor.x, monitor.y, monitor.width, monitor.height,
+                    self.config.get('dot_color', '#FF0000'),
+                    self.config.get('dot_radius_px', 15),
+                    self.config.get('fade_ms', 10000), 
+                    debug_bg=debug_bg
+                )
+                
+                # Add emergency ESC key handler
+                from PySide6.QtCore import Qt
+                from PySide6.QtGui import QShortcut, QKeySequence
+                self.emergency_shortcut = QShortcut(QKeySequence(Qt.Key_Escape), self.overlay)
+                self.emergency_shortcut.activated.connect(emergency_close)
+                
+                logger.info(f"✅ Simple overlay created on monitor {monitor_index} (debug={debug_bg})")
+                logger.info("📌 Press ESC if overlay blocks your screen!")
+                
             else:
+                # Linux fallback
                 from overlay_linux import LinuxOverlayWindow
-                self.overlay = LinuxOverlayWindow()
-                self.overlay.show()
-                try:
-                    self.overlay.clear_dots()
-                except Exception:
-                    pass
-                logger.info('✅ Linux overlay window created for testing')
+                self.overlay = LinuxOverlayWindow(monitor.x, monitor.y, monitor.width, monitor.height,
+                                                 self.config.get('dot_color', '#FF0000'),
+                                                 self.config.get('dot_radius_px', 15),
+                                                 self.config.get('fade_ms', 10000))
+                logger.info(f"✅ Linux overlay window created on monitor {monitor_index}")
+                
+            self.overlay.show()
+            # Ensure any residual state is cleared
+            try:
+                self.overlay.clear_dots()
+            except Exception:
+                pass
+                
         except Exception as e:
-            logger.error(f"❌ Failed to create any overlay: {e}")
+            logger.error(f"Failed to create overlay window: {e}")
             self.overlay = None
     
     def _setup_firestore_watcher(self):
