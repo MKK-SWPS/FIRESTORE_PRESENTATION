@@ -263,9 +263,12 @@
 
         async function sendTapResponse(normalizedX, normalizedY) {
             if (!isAuthenticated || currentSlideIndex < 0) {
-                console.warn('Cannot send tap: not authenticated or no active slide');
+                console.warn('⚠️ Cannot send tap: not authenticated or no active slide');
+                console.log('🔍 Debug state:', { isAuthenticated, currentSlideIndex, SESSION_ID });
                 return;
             }
+
+            console.log(`📍 Sending tap response: (${normalizedX.toFixed(3)}, ${normalizedY.toFixed(3)}) on slide ${currentSlideIndex}`);
 
             try {
                 const responsesRef = collection(
@@ -275,16 +278,20 @@
                     'responses'
                 );
 
-                await addDoc(responsesRef, {
+                const responseData = {
                     x: normalizedX,
                     y: normalizedY,
-                    ts: serverTimestamp()
-                });
+                    timestamp: serverTimestamp()
+                };
+                
+                console.log('📤 Response data:', responseData);
+                console.log('📂 Collection path:', `sessions/${SESSION_ID}/slides/${currentSlideIndex}/responses`);
 
-                console.log('Tap sent:', { x: normalizedX, y: normalizedY });
+                const docRef = await addDoc(responsesRef, responseData);
+                console.log('✅ Tap response sent successfully! Document ID:', docRef.id);
             } catch (err) {
-                console.error('Failed to send tap response:', err);
-                // Don't show error to user for individual tap failures
+                console.error('❌ Failed to send tap response:', err);
+                console.error('❌ Error details:', err.code, err.message);
             }
         }
 

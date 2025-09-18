@@ -380,7 +380,38 @@ class DesktopHelper:
             
             # Convert to PIL Image for saving
             from PIL import Image
-            img = Image.frombytes("RGB", screenshot.size, screenshot.bgra, "BGRX")
+            import numpy as np
+            
+            try:
+                # Method 1: Try direct BGRX conversion
+                img = Image.frombytes("RGB", screenshot.size, screenshot.bgra, "BGRX")
+            except ValueError as e:
+                logger.warning(f"BGRX conversion failed ({e}), trying alternative method...")
+                try:
+                    # Method 2: Convert BGRA to RGB manually
+                    import array
+                    bgra_data = screenshot.bgra
+                    rgba_data = array.array('B')
+                    
+                    # Convert BGRA to RGBA
+                    for i in range(0, len(bgra_data), 4):
+                        b, g, r, a = bgra_data[i:i+4]
+                        rgba_data.extend([r, g, b])  # RGB, skip alpha
+                    
+                    img = Image.frombytes("RGB", screenshot.size, rgba_data.tobytes())
+                except Exception as e2:
+                    logger.warning(f"Manual conversion failed ({e2}), trying numpy method...")
+                    try:
+                        # Method 3: Use numpy for conversion
+                        bgra_array = np.frombuffer(screenshot.bgra, dtype=np.uint8)
+                        bgra_array = bgra_array.reshape(screenshot.height, screenshot.width, 4)
+                        
+                        # Convert BGRA to RGB
+                        rgb_array = bgra_array[:, :, [2, 1, 0]]  # B,G,R,A -> R,G,B
+                        img = Image.fromarray(rgb_array, mode='RGB')
+                    except Exception as e3:
+                        logger.error(f"All conversion methods failed: {e3}")
+                        return None, None
             
             return img, monitor
     
@@ -482,31 +513,46 @@ class DesktopHelper:
         slide_index = session_data.get('slideIndex', 0)
         slides = session_data.get('slides', [])
         
-        logger.info(f"Session updated: slide {slide_index + 1}/{len(slides)}")
+        logger.info(f"📊 Session updated: slide {slide_index + 1}/{len(slides)}")
+        logger.info(f"🎯 Setting current_slide_index to: {slide_index}")
         
         # If slide index changed away from our current overlay, clear dots
         if slide_index != self.current_slide_index and self.overlay:
             self.overlay.clear_dots()
-            logger.info("Cleared overlay dots due to slide change")
+            logger.info("🧹 Cleared overlay dots due to slide change")
+        
+        # Update current slide index
+        self.current_slide_index = slide_index
     
     def _on_new_response(self, response_data, slide_index):
         """Handle new tap responses from students."""
+        logger.info(f"🔍 New response received: slide_index={slide_index}, current_slide_index={self.current_slide_index}")
+        logger.info(f"📍 Response data: {response_data}")
+        
         if slide_index != self.current_slide_index:
             # Response is for a different slide, ignore
+            logger.warning(f"⚠️ Response ignored - slide mismatch (response:{slide_index} vs current:{self.current_slide_index})")
             return
         
         # Get normalized coordinates
         x = response_data.get('x', 0)
         y = response_data.get('y', 0)
         
+        logger.info(f"📐 Normalized coordinates: x={x:.3f}, y={y:.3f}")
+        
         # Convert to absolute coordinates based on current monitor
         monitor, _ = self._get_monitor_info()
         abs_x = int(x * monitor.width) + monitor.x
         abs_y = int(y * monitor.height) + monitor.y
         
+        logger.info(f"🖥️ Absolute coordinates: ({abs_x}, {abs_y}) on monitor {monitor.width}x{monitor.height}")
+        
         # Add dot to overlay
         if self.overlay:
             self.overlay.add_dot(abs_x, abs_y)
+            logger.info(f"✅ Dot added to overlay at ({abs_x}, {abs_y})")
+        else:
+            logger.error("❌ Overlay is None - cannot add dot!")
         
         logger.debug(f"Added dot at ({abs_x}, {abs_y}) from normalized ({x:.3f}, {y:.3f})")
     

@@ -21,14 +21,10 @@ class ScreenshotHTTPServer:
         self.thread = None
         
     class ScreenshotHandler(SimpleHTTPRequestHandler):
-        def __init__(self, callback):
+        def __init__(self, request, client_address, server, callback=None):
             self.screenshot_callback = callback
-            super().__init__()
+            super().__init__(request, client_address, server)
             
-        def __call__(self, *args, **kwargs):
-            self.screenshot_callback = self.screenshot_callback
-            return super().__call__(*args, **kwargs)
-        
         def do_GET(self):
             if self.path == '/capture' or self.path == '/':
                 try:
@@ -38,6 +34,7 @@ class ScreenshotHTTPServer:
                     # Send success response
                     self.send_response(200)
                     self.send_header('Content-type', 'text/html')
+                    self.send_header('Cache-Control', 'no-cache')
                     self.end_headers()
                     
                     response = """
@@ -64,7 +61,7 @@ class ScreenshotHTTPServer:
                         <p><small>Keep this window open while presenting</small></p>
                     </body>
                     </html>
-                    """.format(self.server.server_address[1] if hasattr(self, 'server') else self.port)
+                    """.format(self.server.server_address[1])
                     
                     self.wfile.write(response.encode())
                     
@@ -81,9 +78,14 @@ class ScreenshotHTTPServer:
     def start(self):
         """Start the HTTP server in a background thread."""
         try:
-            handler = lambda *args, **kwargs: self.ScreenshotHandler(self.callback)(*args, **kwargs)
-            self.server = HTTPServer(('localhost', self.port), handler)
-            self.server.screenshot_callback = self.callback
+            def handler_factory(callback):
+                class Handler(self.ScreenshotHandler):
+                    def __init__(self, request, client_address, server):
+                        super().__init__(request, client_address, server, callback=callback)
+                return Handler
+            
+            handler_class = handler_factory(self.callback)
+            self.server = HTTPServer(('localhost', self.port), handler_class)
             
             self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
             self.thread.start()
