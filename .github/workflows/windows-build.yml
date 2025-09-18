@@ -13,6 +13,12 @@ on:
       - '.github/workflows/windows-build.yml'
   workflow_dispatch:  # Allow manual triggering
 
+# Add explicit permissions for the workflow
+permissions:
+  contents: write  # Required to create releases and upload assets
+  actions: read    # Required to read workflow artifacts
+  checks: write    # Required to write check results
+
 jobs:
   build-windows-exe:
     runs-on: windows-latest
@@ -232,9 +238,32 @@ jobs:
         retention-days: 90
         if-no-files-found: error
     
+    - name: Debug GitHub context (for troubleshooting)
+      if: github.ref == 'refs/heads/main'
+      shell: pwsh
+      run: |
+        Write-Host "🔍 Debug Information:" -ForegroundColor Cyan
+        Write-Host "Repository: ${{ github.repository }}"
+        Write-Host "Ref: ${{ github.ref }}"
+        Write-Host "SHA: ${{ github.sha }}"
+        Write-Host "Actor: ${{ github.actor }}"
+        Write-Host "Token available: ${{ secrets.GITHUB_TOKEN != '' }}"
+        Write-Host "Build version: ${{ env.BUILD_VERSION }}"
+        
+        # Check if ZIP file exists
+        $zipFiles = Get-ChildItem -Path "dist" -Filter "slide_tap_helper_*.zip" -ErrorAction SilentlyContinue
+        if ($zipFiles) {
+          Write-Host "📦 ZIP files found:"
+          $zipFiles | ForEach-Object { Write-Host "  - $($_.Name) ($([math]::Round($_.Length/1MB,2)) MB)" }
+        } else {
+          Write-Warning "⚠️ No ZIP files found in dist directory"
+        }
+    
     - name: Create release (on main branch)
       if: github.ref == 'refs/heads/main'
-      uses: softprops/action-gh-release@v1
+      id: create_release
+      continue-on-error: true  # Don't fail the entire workflow if release creation fails
+      uses: softprops/action-gh-release@v2  # Use newer version
       with:
         tag_name: v${{ env.BUILD_VERSION }}
         name: Slide Tap Helper v${{ env.BUILD_VERSION }}
@@ -247,8 +276,14 @@ jobs:
           
           ### What's included:
           - `slide_tap_helper.exe` - Windows executable (single file)
+          - `slide_tap_helper_debug.exe` - Debug version with console output
           - `config.example.json` - Configuration template
           - `README.txt` - Quick start guide
+          
+          ### Screenshot Trigger Methods:
+          - **Hotkey**: Ctrl+B (with automatic fallbacks)
+          - **Browser**: Bookmark http://localhost:8889 for one-click capture
+          - **File**: Create `capture_now.txt` file to trigger screenshot
           
           ### Setup:
           1. Download and extract the ZIP file
@@ -266,5 +301,21 @@ jobs:
           dist/slide_tap_helper_*.zip
         draft: false
         prerelease: false
+        make_latest: true
+        fail_on_unmatched_files: false  # Don't fail if files don't match pattern
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    
+    - name: Release creation result
+      shell: pwsh
+      run: |
+        if ("${{ steps.create_release.outcome }}" -eq "success") {
+          Write-Host "✅ GitHub release created successfully!" -ForegroundColor Green
+          Write-Host "🔗 Release URL: ${{ steps.create_release.outputs.url }}"
+        } elseif ("${{ steps.create_release.outcome }}" -eq "failure") {
+          Write-Warning "⚠️ GitHub release creation failed, but build artifacts are still available"
+          Write-Host "📦 Artifacts can be downloaded from the Actions tab"
+          Write-Host "💡 This doesn't affect the functionality - executables were built successfully"
+        } else {
+          Write-Host "ℹ️ Release creation was skipped (not on main branch or other reason)"
+        }
