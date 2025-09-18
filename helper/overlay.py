@@ -91,8 +91,10 @@ class OverlayWindow(QWidget):
         self.dot_radius = dot_radius
         self.fade_ms = fade_ms
         
-        # State
-        self.dots: List[TapDot] = []
+        # Simple dot storage: list of (x, y, timestamp) tuples
+        self.dots = []
+        self.DOT_SIZE = dot_radius * 2
+        self.DOT_DURATION = fade_ms / 1000.0  # Convert ms to seconds
         
         # Setup window
         self._setup_window(x, y, width, height)
@@ -100,8 +102,8 @@ class OverlayWindow(QWidget):
         
         # Timer for updating dots and repainting
         self.update_timer = QTimer()
-        self.update_timer.timeout.connect(self._update_dots)
-        self.update_timer.start(50)  # Update every 50ms for smooth animation
+        self.update_timer.timeout.connect(self._cleanup_dots)
+        self.update_timer.start(100)  # Update every 100ms
         
         logger.info(f"Overlay window created: {width}x{height} at ({x}, {y})")
     
@@ -218,61 +220,69 @@ class OverlayWindow(QWidget):
             self.update()  # Trigger repaint
             logger.debug("Cleared all overlay dots")
     
-    def _update_dots(self):
-        """Update dots, removing expired ones and triggering repaints."""
+    def _cleanup_dots(self):
+        """Remove expired dots and trigger repaint if needed."""
         if not self.dots:
             return
         
-        # Remove expired dots
+        current_time = time.time()
         initial_count = len(self.dots)
-        self.dots = [dot for dot in self.dots if not dot.is_expired()]
+        
+        # Remove expired dots
+        self.dots = [(x, y, timestamp) for x, y, timestamp in self.dots 
+                     if current_time - timestamp < self.DOT_DURATION]
         
         if len(self.dots) != initial_count:
             logger.debug(f"Removed {initial_count - len(self.dots)} expired dots")
-        
-        # Trigger repaint if there are still dots
-        if self.dots:
-            self.update()
+            self.update()  # Trigger repaint
+    
+    def _update_dots(self):
+        """Legacy method - calls _cleanup_dots for compatibility."""
+        self._cleanup_dots()
     
     def paintEvent(self, event):
         """Handle paint events to draw tap dots."""
         painter = QPainter(self)
         
-        # Enable anti-aliasing
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-        
-        # Clear the background
-        painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_Clear)
-        painter.fillRect(self.rect(), QColor(0, 0, 0, 0))
-        painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceOver)
-        
-        current_time = time.time()
-        
-        # Draw dots and remove expired ones
-        self.dots = [(x, y, timestamp) for x, y, timestamp in self.dots 
-                     if current_time - timestamp < self.DOT_DURATION]
-        
-        for x, y, timestamp in self.dots:
-            # Calculate fade based on age
-            age = current_time - timestamp
-            fade_factor = 1.0 - (age / self.DOT_DURATION)
-            alpha = int(255 * fade_factor)
+        try:
+            # Enable anti-aliasing
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
             
-            # Set up the pen and brush for the dot
-            color = QColor(255, 0, 0, alpha)  # Red with alpha
-            painter.setPen(QPen(color, 2))
-            painter.setBrush(QBrush(color))
+            # Clear the background
+            painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_Clear)
+            painter.fillRect(self.rect(), QColor(0, 0, 0, 0))
+            painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceOver)
             
-            # Draw a circle
-            painter.drawEllipse(int(x - self.DOT_SIZE//2), int(y - self.DOT_SIZE//2), 
-                              self.DOT_SIZE, self.DOT_SIZE)
+            current_time = time.time()
             
-            logger.debug(f"Drew dot at ({x}, {y}) with alpha {alpha}")
+            # Draw dots and remove expired ones
+            self.dots = [(x, y, timestamp) for x, y, timestamp in self.dots 
+                         if current_time - timestamp < self.DOT_DURATION]
+            
+            for x, y, timestamp in self.dots:
+                # Calculate fade based on age
+                age = current_time - timestamp
+                fade_factor = 1.0 - (age / self.DOT_DURATION)
+                alpha = int(255 * fade_factor)
+                
+                # Set up the pen and brush for the dot
+                color = QColor(255, 0, 0, alpha)  # Red with alpha
+                painter.setPen(QPen(color, 2))
+                painter.setBrush(QBrush(color))
+                
+                # Draw a circle
+                painter.drawEllipse(int(x - self.DOT_SIZE//2), int(y - self.DOT_SIZE//2), 
+                                  self.DOT_SIZE, self.DOT_SIZE)
+                
+                logger.debug(f"Drew dot at ({x}, {y}) with alpha {alpha}")
+            
+        finally:
+            # Always ensure painter is properly closed
+            painter.end()
         
-        painter.end()
-        
-        # Update the display
-        self.update() if self.dots else None
+        # Update the display if dots exist
+        if self.dots:
+            QTimer.singleShot(50, self.update)
     
     def mousePressEvent(self, event):
         """Override mouse events to ensure they don't interfere."""
