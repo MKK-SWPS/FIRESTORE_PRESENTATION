@@ -355,7 +355,13 @@
                 console.log('Session update:', { slideIndex, totalSlides: slides.length });
 
                 if (slides.length === 0) {
-                    showLoading('Waiting for first slide...');
+                    // Show a test slide placeholder for development/testing
+                    showLoading('No slides yet - displaying test area');
+                    slideImage.style.display = 'none';
+                    slideContainer.style.background = '#2E3440';
+                    slideContainer.innerHTML = '<div style="color: #88C0D0; font-size: 24px; text-align: center; padding: 50px;">Click anywhere to test tap responses<br><small>(Waiting for teacher to share first slide)</small></div>';
+                    slideContainer.style.cursor = 'crosshair';
+                    enableTapHandler(); // Allow tapping even without slides
                     return;
                 }
 
