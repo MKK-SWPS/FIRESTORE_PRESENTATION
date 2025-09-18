@@ -25,7 +25,7 @@ MANIFEST
 
 # PyInstaller
 *.manifest
-*.spec
+# Note: *.spec files are needed for PyInstaller configuration
 
 # Virtual environments
 .venv/

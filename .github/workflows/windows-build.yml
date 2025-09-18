@@ -88,17 +88,45 @@ jobs:
     - name: Build executable with PyInstaller
       run: |
         cd helper
-        echo "Building windowed version..."
-        pyinstaller slide_tap_helper.spec --clean --noconfirm
         
-        echo "Building console version for debugging..."
-        # Create console version by modifying spec temporarily
-        $specContent = Get-Content slide_tap_helper.spec -Raw
-        $debugSpec = $specContent -replace "console=False", "console=True" -replace "name='slide_tap_helper'", "name='slide_tap_helper_debug'"
-        $debugSpec | Out-File slide_tap_helper_debug.spec -Encoding utf8
-        pyinstaller slide_tap_helper_debug.spec --clean --noconfirm
+        # Check if spec file exists and build accordingly
+        if (Test-Path "slide_tap_helper.spec") {
+          Write-Host "Building with PyInstaller spec file..."
+          pyinstaller slide_tap_helper.spec --clean --noconfirm
+          
+          Write-Host "Building console version for debugging..."
+          # Create console version by modifying spec temporarily
+          $specContent = Get-Content slide_tap_helper.spec -Raw
+          $debugSpec = $specContent -replace "console=False", "console=True" -replace "name='slide_tap_helper'", "name='slide_tap_helper_debug'"
+          $debugSpec | Out-File slide_tap_helper_debug.spec -Encoding utf8
+          pyinstaller slide_tap_helper_debug.spec --clean --noconfirm
+        } else {
+          Write-Host "Spec file not found, building with command line options..."
+          
+          # Build windowed version
+          pyinstaller --onefile --windowed --name slide_tap_helper `
+            --add-data "version_info.py;." `
+            --exclude-module _tkinter --exclude-module tkinter `
+            --exclude-module matplotlib --exclude-module numpy --exclude-module pandas `
+            --hidden-import firebase_admin --hidden-import google.cloud.firestore `
+            --hidden-import google.cloud.storage --hidden-import mss --hidden-import screeninfo `
+            --hidden-import win32gui --hidden-import win32con --hidden-import win32api `
+            --hidden-import PySide6.QtCore --hidden-import PySide6.QtWidgets --hidden-import PySide6.QtGui `
+            main.py
+            
+          # Build console version
+          pyinstaller --onefile --console --name slide_tap_helper_debug `
+            --add-data "version_info.py;." `
+            --exclude-module _tkinter --exclude-module tkinter `
+            --exclude-module matplotlib --exclude-module numpy --exclude-module pandas `
+            --hidden-import firebase_admin --hidden-import google.cloud.firestore `
+            --hidden-import google.cloud.storage --hidden-import mss --hidden-import screeninfo `
+            --hidden-import win32gui --hidden-import win32con --hidden-import win32api `
+            --hidden-import PySide6.QtCore --hidden-import PySide6.QtWidgets --hidden-import PySide6.QtGui `
+            main.py
+        }
         
-        echo "Checking build outputs..."
+        # Check build results
         if (Test-Path "dist/slide_tap_helper.exe") {
           $size = (Get-Item "dist/slide_tap_helper.exe").Length
           Write-Host "✅ Windowed build successful! Size: $([math]::Round($size/1MB,2)) MB"
@@ -111,7 +139,7 @@ jobs:
           $debugSize = (Get-Item "dist/slide_tap_helper_debug.exe").Length
           Write-Host "✅ Debug build successful! Size: $([math]::Round($debugSize/1MB,2)) MB"
         } else {
-          Write-Warning "⚠️ Debug build failed"
+          Write-Warning "⚠️ Debug build failed, but continuing..."
         }
       shell: pwsh
       continue-on-error: false
