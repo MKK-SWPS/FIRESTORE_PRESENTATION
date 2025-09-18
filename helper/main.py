@@ -15,23 +15,7 @@ Requirements:
 - config.json with session and Firebase settings
 """
 
-# Version     def _cleanup(self):
-        \"\"\"Clean up resources.\"\"\"
-        logger.info(\"Cleaning up...\")
-        
-        # Stop message timer
-        if hasattr(self, 'message_timer') and self.message_timer:
-            self.message_timer.stop()
-        
-        if self.hotkey_manager:
-            self.hotkey_manager.unregister_hotkey()
-        
-        if self.firestore_watcher:
-            self.firestore_watcher.stop()
-            self.firestore_watcher.wait(5000)  # Wait up to 5 seconds
-        
-        if self.overlay:
-            self.overlay.close()iled executable
+# Version info for compiled executable
 try:
     from version_info import VERSION_INFO
 except ImportError:
@@ -193,8 +177,13 @@ class HotkeyManager:
             return 0
         return win32gui.DefWindowProc(hwnd, msg, wparam, lparam)
     
-    def register_hotkey(self, callback, key=VK_B, modifiers=MOD_CONTROL):
+    def register_hotkey(self, callback, key=None, modifiers=None):
         """Register a global hotkey."""
+        if key is None:
+            key = self.VK_B
+        if modifiers is None:
+            modifiers = self.MOD_CONTROL
+            
         self.callback = callback
         
         if not windll.user32.RegisterHotKeyW(self.hwnd, self.hotkey_id, modifiers, key):
@@ -206,20 +195,6 @@ class HotkeyManager:
         """Unregister the hotkey."""
         if self.hwnd:
             windll.user32.UnregisterHotKeyW(self.hwnd, self.hotkey_id)
-    
-    def pump_messages(self):
-        """Pump messages to handle hotkey events."""
-        msg = wintypes.MSG()
-        while True:
-            result = windll.user32.GetMessageW(byref(msg), None, 0, 0)
-            if result == 0:  # WM_QUIT
-                break
-            elif result == -1:  # Error
-                logger.error("Message pump error")
-                break
-            else:
-                windll.user32.TranslateMessage(byref(msg))
-                windll.user32.DispatchMessageW(byref(msg))
 
 
 class DesktopHelper:
@@ -467,12 +442,12 @@ class DesktopHelper:
         logger.info("Started Firestore watchers")
     
     def run(self):
-        \"\"\"Start the desktop helper application.\"\"\"
+        """Start the desktop helper application."""
         try:
-            logger.info(\"Starting Desktop Helper...\")
-            logger.info(f\"Version: {VERSION_INFO.get('version', 'unknown')}\")
-            logger.info(f\"Session ID: {self.config['session_id']}\")
-            logger.info(f\"Monitor: {self.config['monitor_index']}\")
+            logger.info("Starting Desktop Helper...")
+            logger.info(f"Version: {VERSION_INFO.get('version', 'unknown')}")
+            logger.info(f"Session ID: {self.config['session_id']}")
+            logger.info(f"Monitor: {self.config['monitor_index']}")
             
             # Setup components
             self._setup_overlay()
@@ -480,13 +455,49 @@ class DesktopHelper:
             
             # Register hotkey
             self.hotkey_manager.register_hotkey(self._on_hotkey_pressed)
-            logger.info(\"Press Ctrl+B to capture screenshot\")
+            logger.info("Press Ctrl+B to capture screenshot")
             
-            # Create a timer to handle Windows messages for hotkeys\n            self.message_timer = QTimer()\n            self.message_timer.timeout.connect(self._pump_messages)\n            self.message_timer.start(10)  # Check every 10ms\n            \n            # Start Qt event loop\n            return self.app.exec()\n            \n        except KeyboardInterrupt:\n            logger.info(\"Interrupted by user\")\n            return 0\n        except Exception as e:\n            logger.error(f\"Fatal error: {e}\")\n            return 1\n        finally:\n            self._cleanup()\n    \n    def _pump_messages(self):\n        \"\"\"Pump Windows messages in a thread-safe way.\"\"\"        \n        try:\n            # This needs to be called from the main thread\n            import win32gui\n            import ctypes\n            from ctypes import wintypes\n            \n            msg = wintypes.MSG()\n            bRet = ctypes.windll.user32.PeekMessageW(ctypes.byref(msg), None, 0, 0, 1)  # PM_REMOVE\n            if bRet != 0:  # Message available\n                ctypes.windll.user32.TranslateMessage(ctypes.byref(msg))\n                ctypes.windll.user32.DispatchMessageW(ctypes.byref(msg))\n        except Exception as e:\n            # Don't spam the logs with message pump errors\n            pass
+            # Create a timer to handle Windows messages for hotkeys
+            self.message_timer = QTimer()
+            self.message_timer.timeout.connect(self._pump_messages)
+            self.message_timer.start(10)  # Check every 10ms
+            
+            # Start Qt event loop
+            return self.app.exec()
+            
+        except KeyboardInterrupt:
+            logger.info("Interrupted by user")
+            return 0
+        except Exception as e:
+            logger.error(f"Fatal error: {e}")
+            return 1
+        finally:
+            self._cleanup()
+    
+    def _pump_messages(self):
+        """Pump Windows messages in a thread-safe way."""        
+        try:
+            # This needs to be called from the main thread
+            import win32gui
+            import ctypes
+            from ctypes import wintypes
+            
+            msg = wintypes.MSG()
+            bRet = ctypes.windll.user32.PeekMessageW(ctypes.byref(msg), None, 0, 0, 1)  # PM_REMOVE
+            if bRet != 0:  # Message available
+                ctypes.windll.user32.TranslateMessage(ctypes.byref(msg))
+                ctypes.windll.user32.DispatchMessageW(ctypes.byref(msg))
+        except Exception as e:
+            # Don't spam the logs with message pump errors
+            pass
     
     def _cleanup(self):
         """Clean up resources."""
         logger.info("Cleaning up...")
+        
+        # Stop message timer
+        if hasattr(self, 'message_timer') and self.message_timer:
+            self.message_timer.stop()
         
         if self.hotkey_manager:
             self.hotkey_manager.unregister_hotkey()
