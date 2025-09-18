@@ -1,12 +1,54 @@
-// Minimal demo rules — open writes. Tighten before real use.
+/**
+ * Firestore Security Rules for Student Tap System
+ * 
+ * These rules allow:
+ * 1. Anonymous users to read session data and slide information
+ * 2. Anonymous users to write tap responses to the current slide
+ * 3. Blocks anonymous writes to slides array and slideIndex (helper uses Admin SDK)
+ * 
+ * SECURITY NOTE: These rules are demo-permissive. For production:
+ * - Add session allowlists or time-based restrictions
+ * - Consider user authentication beyond anonymous
+ * - Add rate limiting for tap responses
+ * - Validate response data structure more strictly
+ */
+
 rules_version = '2';
+
 service cloud.firestore {
   match /databases/{database}/documents {
+    
+    // Session documents - allow read, deny anonymous write to control fields
     match /sessions/{sessionId} {
-      allow read, write: if true;
-      match /slides/{slideIndex}/responses/{docId} {
-        allow read, write: if true;
+      // Students can read session info (slides, slideIndex, screenshotMeta)
+      allow read: if request.auth != null;
+      
+      // Block anonymous writes to session control fields
+      // (Helper uses Admin SDK to bypass these rules)
+      allow write: if false;
+      
+      // Slide responses subcollection
+      match /slides/{slideIndex}/responses/{responseId} {
+        // Students can read all responses (for potential future features)
+        allow read: if request.auth != null;
+        
+        // Students can create tap responses with required fields
+        allow create: if request.auth != null 
+          && request.resource.data.keys().hasAll(['x', 'y', 'ts'])
+          && request.resource.data.x is number
+          && request.resource.data.y is number
+          && request.resource.data.x >= 0.0 && request.resource.data.x <= 1.0
+          && request.resource.data.y >= 0.0 && request.resource.data.y <= 1.0
+          && request.resource.data.ts is timestamp;
+        
+        // Block updates and deletes to responses
+        allow update, delete: if false;
       }
+    }
+    
+    // Block all other document access
+    match /{document=**} {
+      allow read, write: if false;
     }
   }
 }

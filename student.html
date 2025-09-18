@@ -1,119 +1,395 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Student — Tap Anywhere</title>
-<style>
-  :root { --bg:#0b0f14; --fg:#e8edf2; --muted:#9aa4af; --accent:#4ea1ff; }
-  html,body { margin:0; height:100%; background:var(--bg); color:var(--fg); font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif; }
-  .wrap { max-width:900px; margin:0 auto; padding:16px; display:flex; flex-direction:column; gap:12px; }
-  .muted { color:var(--muted); font-size:13px; }
-  .panel { background:#0f141b; border:1px solid #1f2732; border-radius:14px; padding:12px; }
-  .stage { position:relative; width:100%; aspect-ratio:16/9; background:#0a0e13; border-radius:12px; overflow:hidden; border:1px solid #1f2732; touch-action:manipulation; }
-  .stage img { width:100%; height:100%; object-fit:contain; display:block; }
-  .tap { position:absolute; inset:0; }
-  .blip { position:absolute; width:12px; height:12px; border-radius:50%; background:var(--accent); border:2px solid rgba(0,0,0,.5); transform:translate(-50%,-50%); opacity:0; transition:opacity .2s ease; }
-  .bar { display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap; }
-  .code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; background:#121923; border:1px solid #1f2732; padding:4px 8px; border-radius:8px; }
-</style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Student Tap Interface</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+            background: #1a1a1a;
+            color: #ffffff;
+            overflow: hidden;
+            height: 100vh;
+            touch-action: manipulation;
+        }
+
+        .header {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            background: rgba(0, 0, 0, 0.8);
+            padding: 8px 16px;
+            font-size: 14px;
+            z-index: 100;
+            backdrop-filter: blur(10px);
+        }
+
+        .status {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .slide-container {
+            position: absolute;
+            top: 50px;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: #000;
+            cursor: crosshair;
+        }
+
+        .slide-stage {
+            position: relative;
+            max-width: 100%;
+            max-height: 100%;
+            aspect-ratio: 16 / 9;
+            background: #222;
+            border-radius: 4px;
+            overflow: hidden;
+        }
+
+        .slide-image {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+            display: block;
+        }
+
+        .loading {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: #888;
+            font-size: 16px;
+        }
+
+        .error {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: #ff4444;
+            text-align: center;
+            padding: 20px;
+            font-size: 16px;
+        }
+
+        .connection-status {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            margin-right: 6px;
+        }
+
+        .connection-status.connected {
+            background: #4CAF50;
+        }
+
+        .connection-status.disconnected {
+            background: #f44336;
+        }
+
+        /* Mobile optimizations */
+        @media (max-width: 768px) {
+            .header {
+                padding: 6px 12px;
+                font-size: 13px;
+            }
+
+            .slide-container {
+                top: 40px;
+            }
+        }
+
+        /* Prevent text selection and context menus on tap targets */
+        .slide-stage {
+            -webkit-user-select: none;
+            -moz-user-select: none;
+            -ms-user-select: none;
+            user-select: none;
+            -webkit-touch-callout: none;
+            -webkit-tap-highlight-color: transparent;
+        }
+    </style>
 </head>
 <body>
-<div class="wrap">
-  <div class="panel bar">
-    <div>Session: <span id="sessionId" class="code"></span></div>
-    <div>Slide <span id="slideIdx">1</span>/<span id="slideTotal">1</span></div>
-  </div>
-  <div class="stage panel" id="stage">
-    <img id="slideImg" alt="Slide" />
-    <div class="tap" id="tapLayer"></div>
-    <div id="blip" class="blip"></div>
-  </div>
-  <div class="muted">Tap anywhere on the slide to send your mark. Every tap is submitted instantly.</div>
-</div>
+    <div class="header">
+        <div class="status">
+            <div>
+                <span class="connection-status disconnected"></span>
+                <span id="session-info">Connecting...</span>
+            </div>
+            <div id="slide-info">-/-</div>
+        </div>
+    </div>
 
-<script type="module">
-/*** ── CONFIG (edit these) ── ***/
-const FIREBASE_CONFIG = {
-  apiKey: "YOUR_API_KEY",
-  authDomain: "YOUR_DOMAIN.firebaseapp.com",
-  projectId: "YOUR_PROJECT_ID",
-  appId: "YOUR_APP_ID",
-};
-const SESSION_ID = "demo-session-001";
-const SLIDE_IMAGES = [
-  "https://images.unsplash.com/photo-1529107386315-e1a2ed48a620?q=80&w=1920&auto=format&fit=crop",
-  "https://images.unsplash.com/photo-1543286386-713bdd548da4?q=80&w=1920&auto=format&fit=crop",
-  "https://images.unsplash.com/photo-1532614338840-ab30cf10ed36?q=80&w=1920&auto=format&fit=crop"
-];
+    <div class="slide-container">
+        <div class="slide-stage" id="slide-stage">
+            <div class="loading" id="loading">Loading presentation...</div>
+            <img class="slide-image" id="slide-image" style="display: none;" alt="Current slide">
+            <div class="error" id="error" style="display: none;"></div>
+        </div>
+    </div>
 
-/*** ── App ── ***/
-import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-import { getFirestore, doc, onSnapshot, collection, addDoc } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
-import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+    <!-- Firebase Web SDK v9+ (modular) -->
+    <script type="module">
+        // ==================== CONFIGURATION ====================
+        // TODO: Replace with your Firebase project configuration
+        const FIREBASE_CONFIG = {
+            apiKey: "your-api-key",
+            authDomain: "your-project.firebaseapp.com",
+            projectId: "your-project-id",
+            storageBucket: "your-project.appspot.com",
+            messagingSenderId: "123456789",
+            appId: "1:123456789:web:abcdef123456"
+        };
 
-const app = initializeApp(FIREBASE_CONFIG);
-const db  = getFirestore(app);
-const auth = getAuth(app);
-await signInAnonymously(auth).catch(()=>{});
+        // TODO: Set your session ID (e.g., "lecture-2025-09-17")
+        const SESSION_ID = "lecture-2025-09-17";
 
-const $ = id => document.getElementById(id);
-$("sessionId").textContent = SESSION_ID;
-$("slideTotal").textContent = SLIDE_IMAGES.length;
+        // ==================== FIREBASE SETUP ====================
+        import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.7.0/firebase-app.js';
+        import { getAuth, signInAnonymously, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/10.7.0/firebase-auth.js';
+        import { getFirestore, doc, onSnapshot, collection, addDoc, serverTimestamp } from 'https://www.gstatic.com/firebasejs/10.7.0/firebase-firestore.js';
 
-const stage = $("stage"), imgEl = $("slideImg"), tapLayer = $("tapLayer"), blip = $("blip");
-let currentSlide = 0;
+        // Initialize Firebase
+        const app = initializeApp(FIREBASE_CONFIG);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
 
-function computeImageRect(){
-  const r = stage.getBoundingClientRect();
-  const W = Math.floor(r.width), H = Math.floor(r.height);
-  const iw = imgEl.naturalWidth || 1920, ih = imgEl.naturalHeight || 1080;
-  const ia = iw/ih, ca = W/H;
-  if (ca > ia) {
-    const h = H, w = Math.round(h*ia), x = Math.round((W - w)/2), y = 0;
-    return {x,y,w,h, W, H};
-  } else {
-    const w = W, h = Math.round(w/ia), x = 0, y = Math.round((H - h)/2);
-    return {x,y,w,h, W, H};
-  }
-}
-function setSlide(i){
-  currentSlide = Math.max(0, Math.min(SLIDE_IMAGES.length - 1, i));
-  $("slideIdx").textContent = String(currentSlide + 1);
-  imgEl.src = SLIDE_IMAGES[currentSlide];
-}
-imgEl.onload = ()=>{}; // layout handled by CSS
+        // ==================== DOM ELEMENTS ====================
+        const connectionStatus = document.querySelector('.connection-status');
+        const sessionInfo = document.getElementById('session-info');
+        const slideInfo = document.getElementById('slide-info');
+        const slideStage = document.getElementById('slide-stage');
+        const slideImage = document.getElementById('slide-image');
+        const loading = document.getElementById('loading');
+        const error = document.getElementById('error');
 
-// Listen to presenter slide index
-const sessRef = doc(db, "sessions", SESSION_ID);
-onSnapshot(sessRef, (snap) => {
-  const data = snap.data() || {};
-  const idx = Number.isInteger(data.slideIndex) ? data.slideIndex : 0;
-  if (idx !== currentSlide) setSlide(idx);
-});
+        // ==================== STATE ====================
+        let currentSession = null;
+        let currentSlideIndex = -1;
+        let slideImageBounds = null;
+        let isAuthenticated = false;
 
-// Tap → normalized coordinates within the displayed image (ignore letterbox clicks)
-tapLayer.addEventListener("click", async (e) => {
-  const rect = stage.getBoundingClientRect();
-  const clickX = e.clientX - rect.left;
-  const clickY = e.clientY - rect.top;
-  const ir = computeImageRect();
-  const inside = (clickX >= ir.x && clickX <= ir.x + ir.w && clickY >= ir.y && clickY <= ir.y + ir.h);
-  if (!inside) return; // ignore clicks in the black bars
-  const nx = (clickX - ir.x) / ir.w;
-  const ny = (clickY - ir.y) / ir.h;
+        // ==================== UTILITY FUNCTIONS ====================
+        function showError(message) {
+            console.error('Student page error:', message);
+            loading.style.display = 'none';
+            slideImage.style.display = 'none';
+            error.style.display = 'block';
+            error.textContent = message;
+        }
 
-  // Feedback blip
-  blip.style.left = (nx*100) + "%";
-  blip.style.top  = (ny*100) + "%";
-  blip.style.opacity = "1";
-  setTimeout(()=> blip.style.opacity = "0", 250);
+        function showLoading(message = 'Loading...') {
+            error.style.display = 'none';
+            slideImage.style.display = 'none';
+            loading.style.display = 'block';
+            loading.textContent = message;
+        }
 
-  const col = collection(db, "sessions", SESSION_ID, "slides", String(currentSlide), "responses");
-  await addDoc(col, { x: nx, y: ny, ts: Date.now() });
-});
+        function hideLoading() {
+            loading.style.display = 'none';
+            error.style.display = 'none';
+        }
 
-setSlide(0);
-</script>
+        function updateConnectionStatus(connected) {
+            connectionStatus.className = `connection-status ${connected ? 'connected' : 'disconnected'}`;
+        }
+
+        function updateSlideImage(imageUrl, slideIndex, totalSlides) {
+            if (!imageUrl) {
+                showError('No slide available');
+                return;
+            }
+
+            hideLoading();
+            slideImage.src = imageUrl;
+            slideImage.style.display = 'block';
+            
+            slideInfo.textContent = `${slideIndex + 1}/${totalSlides}`;
+
+            // Update image bounds for tap calculation when image loads
+            slideImage.onload = () => {
+                updateImageBounds();
+            };
+        }
+
+        function updateImageBounds() {
+            const rect = slideImage.getBoundingClientRect();
+            slideImageBounds = {
+                left: rect.left,
+                top: rect.top,
+                width: rect.width,
+                height: rect.height
+            };
+        }
+
+        function getNormalizedCoordinates(clientX, clientY) {
+            if (!slideImageBounds) {
+                updateImageBounds();
+                if (!slideImageBounds) return null;
+            }
+
+            // Check if click is within image bounds
+            const x = clientX - slideImageBounds.left;
+            const y = clientY - slideImageBounds.top;
+
+            if (x < 0 || y < 0 || x > slideImageBounds.width || y > slideImageBounds.height) {
+                return null; // Click outside image bounds (letterbox area)
+            }
+
+            // Normalize to 0-1 range
+            const nx = x / slideImageBounds.width;
+            const ny = y / slideImageBounds.height;
+
+            return { x: nx, y: ny };
+        }
+
+        async function sendTapResponse(normalizedX, normalizedY) {
+            if (!isAuthenticated || currentSlideIndex < 0) {
+                console.warn('Cannot send tap: not authenticated or no active slide');
+                return;
+            }
+
+            try {
+                const responsesRef = collection(
+                    db, 
+                    'sessions', SESSION_ID, 
+                    'slides', currentSlideIndex.toString(), 
+                    'responses'
+                );
+
+                await addDoc(responsesRef, {
+                    x: normalizedX,
+                    y: normalizedY,
+                    ts: serverTimestamp()
+                });
+
+                console.log('Tap sent:', { x: normalizedX, y: normalizedY });
+            } catch (err) {
+                console.error('Failed to send tap response:', err);
+                // Don't show error to user for individual tap failures
+            }
+        }
+
+        // ==================== EVENT LISTENERS ====================
+        
+        // Handle taps on slide stage
+        slideStage.addEventListener('click', (event) => {
+            event.preventDefault();
+            
+            const coords = getNormalizedCoordinates(event.clientX, event.clientY);
+            if (coords) {
+                sendTapResponse(coords.x, coords.y);
+            }
+        });
+
+        // Handle touch events for mobile
+        slideStage.addEventListener('touchend', (event) => {
+            event.preventDefault();
+            
+            if (event.changedTouches.length > 0) {
+                const touch = event.changedTouches[0];
+                const coords = getNormalizedCoordinates(touch.clientX, touch.clientY);
+                if (coords) {
+                    sendTapResponse(coords.x, coords.y);
+                }
+            }
+        });
+
+        // Update image bounds on window resize
+        window.addEventListener('resize', updateImageBounds);
+
+        // ==================== FIREBASE LISTENERS ====================
+        
+        // Authentication state
+        onAuthStateChanged(auth, (user) => {
+            if (user) {
+                console.log('Authenticated anonymously:', user.uid);
+                isAuthenticated = true;
+                sessionInfo.textContent = `Session: ${SESSION_ID}`;
+                updateConnectionStatus(true);
+                
+                // Start listening to session data
+                startSessionListener();
+            } else {
+                console.log('Not authenticated');
+                isAuthenticated = false;
+                updateConnectionStatus(false);
+                sessionInfo.textContent = 'Authentication failed';
+                showError('Failed to connect to session');
+            }
+        });
+
+        function startSessionListener() {
+            const sessionRef = doc(db, 'sessions', SESSION_ID);
+            
+            onSnapshot(sessionRef, (doc) => {
+                if (!doc.exists()) {
+                    showError('Session not found. Please wait for presenter to start.');
+                    return;
+                }
+
+                const data = doc.data();
+                currentSession = data;
+                
+                const slides = data.slides || [];
+                const slideIndex = data.slideIndex || 0;
+                
+                console.log('Session update:', { slideIndex, totalSlides: slides.length });
+
+                if (slides.length === 0) {
+                    showLoading('Waiting for first slide...');
+                    return;
+                }
+
+                // Update current slide if index changed or no current slide
+                if (slideIndex !== currentSlideIndex || !slideImage.src) {
+                    currentSlideIndex = slideIndex;
+                    
+                    if (slideIndex < slides.length) {
+                        updateSlideImage(slides[slideIndex], slideIndex, slides.length);
+                    } else {
+                        showError('Slide index out of range');
+                    }
+                }
+            }, (err) => {
+                console.error('Session listener error:', err);
+                updateConnectionStatus(false);
+                showError('Connection lost. Please refresh.');
+            });
+        }
+
+        // ==================== INITIALIZATION ====================
+        
+        // Sign in anonymously when page loads
+        showLoading('Connecting to session...');
+        
+        signInAnonymously(auth).catch((error) => {
+            console.error('Anonymous auth failed:', error);
+            showError('Failed to connect to session. Please refresh.');
+        });
+
+        // Prevent page zoom and context menu
+        document.addEventListener('gesturestart', e => e.preventDefault());
+        document.addEventListener('gesturechange', e => e.preventDefault());
+        document.addEventListener('contextmenu', e => e.preventDefault());
+    </script>
 </body>
 </html>

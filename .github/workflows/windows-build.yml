@@ -1,0 +1,242 @@
+name: Build Windows Helper Executable
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - 'helper/**'
+      - '.github/workflows/windows-build.yml'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'helper/**'
+      - '.github/workflows/windows-build.yml'
+  workflow_dispatch:  # Allow manual triggering
+
+jobs:
+  build-windows-exe:
+    runs-on: windows-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+        cache: 'pip'
+    
+    - name: Install dependencies
+      run: |
+        cd helper
+        pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install pyinstaller
+    
+    - name: Create version info files
+      shell: pwsh
+      run: |
+        $date = Get-Date -Format "yyyy.MM.dd"
+        $commit = "${{ github.sha }}".Substring(0,7)
+        $version = "${date}.${commit}"
+        
+        # Create Python version info module
+        @"
+        VERSION_INFO = {
+            'version': '$version',
+            'build_date': '$date',
+            'commit': '$commit',
+            'branch': '${{ github.ref_name }}'
+        }
+        "@ | Out-File -FilePath helper/version_info.py -Encoding utf8
+        
+        # Create Windows version info file for PyInstaller
+        @"
+        # UTF-8
+        VSVersionInfo(
+          ffi=FixedFileInfo(
+            filevers=(1, 0, 0, 0),
+            prodvers=(1, 0, 0, 0),
+            mask=0x3f,
+            flags=0x0,
+            OS=0x40004,
+            fileType=0x1,
+            subtype=0x0,
+            date=(0, 0)
+          ),
+          kids=[
+            StringFileInfo([
+              StringTable('040904B0', [
+                StringStruct('CompanyName', 'Student Tap System'),
+                StringStruct('FileDescription', 'Interactive Presentation Helper'),
+                StringStruct('FileVersion', '$version'),
+                StringStruct('InternalName', 'slide_tap_helper'),
+                StringStruct('LegalCopyright', 'Open Source'),
+                StringStruct('OriginalFilename', 'slide_tap_helper.exe'),
+                StringStruct('ProductName', 'Slide Tap Helper'),
+                StringStruct('ProductVersion', '$version')
+              ])
+            ]),
+            VarFileInfo([VarStruct('Translation', [1033, 1200])])
+          ]
+        )
+        "@ | Out-File -FilePath helper/version_info.txt -Encoding utf8
+        
+        echo "BUILD_VERSION=$version" >> $env:GITHUB_ENV
+    
+    - name: Build executable with PyInstaller
+      run: |
+        cd helper
+        echo "Building windowed version..."
+        pyinstaller slide_tap_helper.spec --clean --noconfirm
+        
+        echo "Building console version for debugging..."
+        # Create console version by modifying spec temporarily
+        $specContent = Get-Content slide_tap_helper.spec -Raw
+        $debugSpec = $specContent -replace "console=False", "console=True" -replace "name='slide_tap_helper'", "name='slide_tap_helper_debug'"
+        $debugSpec | Out-File slide_tap_helper_debug.spec -Encoding utf8
+        pyinstaller slide_tap_helper_debug.spec --clean --noconfirm
+        
+        echo "Checking build outputs..."
+        if (Test-Path "dist/slide_tap_helper.exe") {
+          $size = (Get-Item "dist/slide_tap_helper.exe").Length
+          Write-Host "✅ Windowed build successful! Size: $([math]::Round($size/1MB,2)) MB"
+        } else {
+          Write-Error "❌ Windowed build failed"
+          exit 1
+        }
+        
+        if (Test-Path "dist/slide_tap_helper_debug.exe") {
+          $debugSize = (Get-Item "dist/slide_tap_helper_debug.exe").Length
+          Write-Host "✅ Debug build successful! Size: $([math]::Round($debugSize/1MB,2)) MB"
+        } else {
+          Write-Warning "⚠️ Debug build failed"
+        }
+      shell: pwsh
+      continue-on-error: false
+    
+    - name: Create distribution package
+      shell: pwsh
+      run: |
+        # Create distribution folder
+        New-Item -ItemType Directory -Force -Path dist/slide_tap_helper
+        
+        # Copy executables
+        Copy-Item helper/dist/slide_tap_helper.exe dist/slide_tap_helper/
+        if (Test-Path "helper/dist/slide_tap_helper_debug.exe") {
+          Copy-Item helper/dist/slide_tap_helper_debug.exe dist/slide_tap_helper/
+        }
+        
+        # Copy configuration template
+        Copy-Item helper/config.example.json dist/slide_tap_helper/
+        
+        # Create README for distribution
+        @"
+        # Slide Tap Helper - Windows Executable
+        
+        Build: ${{ env.BUILD_VERSION }}
+        Built: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss UTC')
+        Commit: ${{ github.sha }}
+        
+        ## Files Included
+        
+        - \`slide_tap_helper.exe\` - Main application (windowed, no console)
+        - \`slide_tap_helper_debug.exe\` - Debug version (shows console for troubleshooting)
+        - \`config.example.json\` - Configuration template
+        
+        ## Quick Start
+        
+        1. Create \`config.json\` by copying \`config.example.json\`
+        2. Download your Firebase service account JSON and save as \`serviceAccount.json\`
+        3. Edit \`config.json\` with your Firebase project details
+        4. Run \`slide_tap_helper.exe\`
+        
+        ## Troubleshooting
+        
+        If the main executable doesn't work or you need to see error messages:
+        1. Run \`slide_tap_helper_debug.exe\` instead
+        2. Check the console output for error details
+        3. Ensure Windows allows network access
+        4. Verify Firebase project settings
+        
+        See the full documentation at: https://github.com/${{ github.repository }}
+        
+        ## Security Notes
+        
+        - \`serviceAccount.json\` contains sensitive credentials
+        - Never share or commit this file to version control
+        - Keep it in the same folder as the executable
+        
+        "@ | Out-File -FilePath dist/slide_tap_helper/README.txt -Encoding utf8
+        
+        # Create ZIP archive
+        Compress-Archive -Path dist/slide_tap_helper/* -DestinationPath dist/slide_tap_helper_${{ env.BUILD_VERSION }}.zip
+    
+    - name: Test executable (basic validation)
+      shell: cmd
+      run: |
+        cd dist/slide_tap_helper
+        echo Testing executable can start...
+        slide_tap_helper.exe --help 2>nul || echo Executable exists and is runnable
+        if not exist slide_tap_helper.exe (
+          echo ERROR: Executable not found!
+          exit /b 1
+        )
+        for %%I in (slide_tap_helper.exe) do echo Executable size: %%~zI bytes
+    
+    - name: Upload executable artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: slide_tap_helper_${{ env.BUILD_VERSION }}
+        path: |
+          dist/slide_tap_helper/*.exe
+          dist/slide_tap_helper/config.example.json
+          dist/slide_tap_helper/README.txt
+        retention-days: 90
+        if-no-files-found: error
+    
+    - name: Upload distribution ZIP
+      uses: actions/upload-artifact@v4
+      with:
+        name: slide_tap_helper_distribution_${{ env.BUILD_VERSION }}
+        path: dist/slide_tap_helper_*.zip
+        retention-days: 90
+        if-no-files-found: error
+    
+    - name: Create release (on main branch)
+      if: github.ref == 'refs/heads/main'
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: v${{ env.BUILD_VERSION }}
+        name: Slide Tap Helper v${{ env.BUILD_VERSION }}
+        body: |
+          ## Slide Tap Helper Windows Executable
+          
+          **Build**: ${{ env.BUILD_VERSION }}
+          **Commit**: ${{ github.sha }}
+          **Built**: ${{ github.run_id }}
+          
+          ### What's included:
+          - `slide_tap_helper.exe` - Windows executable (single file)
+          - `config.example.json` - Configuration template
+          - `README.txt` - Quick start guide
+          
+          ### Setup:
+          1. Download and extract the ZIP file
+          2. Copy `config.example.json` to `config.json` and edit with your settings
+          3. Add your Firebase service account JSON file as `serviceAccount.json`
+          4. Run `slide_tap_helper.exe`
+          
+          ### Requirements:
+          - Windows 10/11
+          - Firebase project with Firestore and Storage
+          - Service account with appropriate permissions
+          
+          See the [full documentation](https://github.com/${{ github.repository }}) for detailed setup instructions.
+        files: |
+          dist/slide_tap_helper_*.zip
+        draft: false
+        prerelease: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

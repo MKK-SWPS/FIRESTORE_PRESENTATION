@@ -1,0 +1,36 @@
+/**
+ * Firebase Storage Security Rules for Student Tap System
+ * 
+ * These rules allow:
+ * 1. Public read access to session slide images
+ * 2. Block public write access (helper uses Admin SDK)
+ * 
+ * SECURITY NOTE: These rules are demo-permissive. For production:
+ * - Add authentication requirements for read access
+ * - Consider time-based access restrictions
+ * - Add file size and type validation
+ * - Implement cleanup policies for old slides
+ */
+
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+    
+    // Session slide images - allow public read, block public write
+    match /sessions/{sessionId}/slides/{slideFile} {
+      // Allow public read access so students can view images
+      // (Consider adding auth requirement: request.auth != null)
+      allow read: if true;
+      
+      // Block public write access
+      // Helper uses Admin SDK to bypass this rule
+      allow write: if false;
+    }
+    
+    // Block access to all other storage paths
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

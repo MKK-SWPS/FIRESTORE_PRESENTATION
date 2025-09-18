@@ -1,0 +1,32 @@
+{
+  "_comment": "Configuration template for Windows Desktop Helper",
+  "_instructions": [
+    "Copy this file to 'config.json' and fill in your Firebase project details",
+    "DO NOT commit config.json - it contains sensitive information",
+    "Get Firebase config from Firebase Console > Project Settings"
+  ],
+  
+  "session_id": "lecture-2025-09-17",
+  "_session_id_note": "Unique identifier for this presentation session. Students will use the same ID.",
+  
+  "service_account_path": "serviceAccount.json",
+  "_service_account_note": "Path to Firebase service account JSON file. Download from Firebase Console > Project Settings > Service Accounts",
+  
+  "storage_bucket": "your-project-id.appspot.com",
+  "_storage_bucket_note": "Firebase Storage bucket name. Usually matches your project ID + .appspot.com",
+  
+  "monitor_index": 0,
+  "_monitor_index_note": "Which monitor to capture and overlay on (0 = primary monitor, 1 = second monitor, etc.)",
+  
+  "hotkey": "ctrl+b",
+  "_hotkey_note": "Global hotkey combination to capture screenshots. Currently only 'ctrl+b' is supported",
+  
+  "dot_color": "#8E4EC6",
+  "_dot_color_note": "Color of tap dots shown on overlay (hex format). Default is purple",
+  
+  "dot_radius_px": 8,
+  "_dot_radius_note": "Radius of tap dots in pixels",
+  
+  "fade_ms": 10000,
+  "_fade_ms_note": "How long dots stay visible before fading out (milliseconds). 10000 = 10 seconds"
+}
