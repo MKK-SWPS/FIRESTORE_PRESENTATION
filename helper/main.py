@@ -31,11 +31,11 @@ import os
 import sys
 import time
 import threading
+import platform
 from datetime import datetime
 from pathlib import Path
 import logging
 
-# Windows-specific imports
 # Windows-specific imports (only on Windows)
 HAS_WIN32 = False
 if platform.system() == "Windows":
@@ -43,11 +43,11 @@ if platform.system() == "Windows":
         import win32gui
         import win32con
         import win32api
+        from ctypes import windll, wintypes, c_int, c_bool, byref
         HAS_WIN32 = True
     except ImportError:
         print("Warning: Windows API modules not available")
         HAS_WIN32 = False
-from ctypes import windll, wintypes, c_int, c_bool, byref
 
 # Firebase imports
 import firebase_admin
