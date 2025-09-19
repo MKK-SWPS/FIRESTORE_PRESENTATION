@@ -418,15 +418,45 @@ class DesktopHelper:
             raise
     
     def _get_monitor_info(self):
-        """Get information about the target monitor."""
-        monitor_index = self.config.get('monitor_index', 0)
+        """Get information about the target monitor with auto-detection."""
+        monitor_index = self.config.get('monitor_index', 'auto')
         
-        if monitor_index >= len(self.monitors):
-            logger.warning(f"Monitor index {monitor_index} not found, using primary monitor")
-            monitor_index = 0
-        
-        monitor = self.monitors[monitor_index]
-        logger.info(f"Using monitor {monitor_index}: {monitor.width}x{monitor.height} at ({monitor.x}, {monitor.y})")
+        if monitor_index == 'auto':
+            # Auto-detect: prefer primary monitor, or if no primary, use the largest one
+            primary_monitor = None
+            largest_monitor = None
+            largest_area = 0
+            
+            for i, mon in enumerate(self.monitors):
+                area = mon.width * mon.height
+                if area > largest_area:
+                    largest_area = area
+                    largest_monitor = (mon, i)
+                
+                # screeninfo sometimes marks primary with is_primary attribute
+                if hasattr(mon, 'is_primary') and mon.is_primary:
+                    primary_monitor = (mon, i)
+                # Also check if monitor is at origin (0,0) which usually indicates primary
+                elif mon.x == 0 and mon.y == 0:
+                    primary_monitor = (mon, i)
+            
+            if primary_monitor:
+                monitor, monitor_index = primary_monitor
+                logger.info(f"Auto-detected primary monitor {monitor_index}: {monitor.width}x{monitor.height} at ({monitor.x}, {monitor.y})")
+            elif largest_monitor:
+                monitor, monitor_index = largest_monitor
+                logger.info(f"Auto-detected largest monitor {monitor_index}: {monitor.width}x{monitor.height} at ({monitor.x}, {monitor.y})")
+            else:
+                monitor, monitor_index = self.monitors[0], 0
+                logger.info(f"Fallback to first monitor {monitor_index}: {monitor.width}x{monitor.height} at ({monitor.x}, {monitor.y})")
+        else:
+            # Manual monitor index specified
+            if monitor_index >= len(self.monitors):
+                logger.warning(f"Monitor index {monitor_index} not found, using primary monitor")
+                monitor_index = 0
+            
+            monitor = self.monitors[monitor_index]
+            logger.info(f"Using specified monitor {monitor_index}: {monitor.width}x{monitor.height} at ({monitor.x}, {monitor.y})")
         
         return monitor, monitor_index
     
@@ -666,7 +696,8 @@ class DesktopHelper:
                     self.config.get('dot_color', '#FFFF00'),  # Yellow highlighter default
                     self.config.get('dot_radius_px', 20),  # Larger for visibility
                     self.config.get('fade_ms', 10000), 
-                    debug_bg=debug_bg
+                    debug_bg=debug_bg,
+                    force_basic=self.config.get('overlay_force_basic', True)
                 )
                 
                 # Add multiple emergency exit shortcuts
@@ -687,10 +718,7 @@ class DesktopHelper:
 
                 logger.info(f"✅ Simple overlay created on monitor {monitor_index} (debug={debug_bg})")
                 logger.info("📌 Emergency exits: ESC, Ctrl+Alt+X, or Alt+F4")
-                # Optional test dot
-                if self.config.get('overlay_test_dot', True):
-                    self.overlay.add_dot(monitor.width//2, monitor.height//2)
-                    logger.info("🟡 Placed startup test dot (center). Disable with overlay_test_dot:false in config.json")
+                # We'll place test dot after initial show & clear for accurate geometry
                 
             else:
                 # Linux fallback
@@ -702,18 +730,22 @@ class DesktopHelper:
                 logger.info(f"✅ Linux overlay window created on monitor {monitor_index}")
                 
             self.overlay.show()
-            # Ensure any residual state is cleared
+            # Ensure any residual state is cleared then optionally place startup test dot using widget dimensions
             try:
                 self.overlay.clear_dots()
             except Exception:
                 pass
-            # Re-add test dot after clear if enabled
             if self.config.get('overlay_test_dot', True):
                 try:
-                    mon, _ = self._get_monitor_info()
-                    self.overlay.add_dot(mon.width//2, mon.height//2)
-                except Exception:
-                    pass
+                    # Use overlay widget dimensions (after show) rather than monitor in case of DPI scaling
+                    w = self.overlay.width()
+                    h = self.overlay.height()
+                    cx = w // 2
+                    cy = h // 2
+                    self.overlay.add_dot(cx, cy)
+                    logger.info(f"🟡 Placed startup test dot at widget center ({cx},{cy}) size={w}x{h}. Disable with overlay_test_dot:false in config.json")
+                except Exception as e:
+                    logger.warning(f"Failed to place test dot: {e}")
                 
         except Exception as e:
             logger.error(f"Failed to create overlay window: {e}")

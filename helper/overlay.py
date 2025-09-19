@@ -41,11 +41,18 @@ logger = logging.getLogger(__name__)
 
 
 class SimpleOverlayWindow(QWidget):
-    """Simple overlay window without layered transparency - more reliable."""
+    """Simple overlay window without layered transparency - more reliable.
+
+    Improvements:
+    - Optional skip of Windows layered/click-through style (overlay_force_basic)
+    - Fully transparent background (removed residual 1 alpha fill) to eliminate black screen
+    - Paint diagnostics (counts, devicePixelRatio, geometry) for troubleshooting
+    - Heuristic coordinate scaling if incoming dots appear outside widget bounds due to DPI scaling
+    """
     
     def __init__(self, x: int, y: int, width: int, height: int, 
                  dot_color: str = '#FFFF00', dot_radius: int = 20, fade_ms: int = 10000,
-                 debug_bg: bool = False):
+                 debug_bg: bool = False, force_basic: bool = True):
         super().__init__()
         
         # Store monitor geometry for reference
@@ -59,6 +66,7 @@ class SimpleOverlayWindow(QWidget):
         self.dot_radius = dot_radius
         self.fade_ms = fade_ms
         self.debug_bg = debug_bg
+        self.force_basic = force_basic
         
         # Simple dot storage: list of (x, y, timestamp) tuples
         self.dots = []
@@ -79,18 +87,27 @@ class SimpleOverlayWindow(QWidget):
         self.setAttribute(Qt.WA_TransparentForMouseEvents, True)
         # Avoid forcing WA_NoSystemBackground (can cause black on some GPUs) and instead clear in paint
         self.setAutoFillBackground(False)
-        self.setStyleSheet("background: rgba(0,0,0,1);")  # Almost fully transparent (alpha=1)
+        # Remove any background fill. Using stylesheet with full transparency can still trigger paint on some GPUs.
+        # Avoid stylesheet entirely unless debug background requested.
+        if self.debug_bg:
+            # Show faint border / tint for diagnostics only
+            self.setStyleSheet("background: rgba(30,30,30,120);")
+        else:
+            self.setStyleSheet("")
         
         # Apply Windows-specific transparency and click-through
-        if HAS_WIN32:
-            QTimer.singleShot(100, self._apply_windows_transparency)
+        if HAS_WIN32 and not self.force_basic:
+            # Allow time for window to fully create before applying extended styles
+            QTimer.singleShot(120, self._apply_windows_transparency)
             
         # Timer for cleanup
         self.update_timer = QTimer()
         self.update_timer.timeout.connect(self._cleanup_dots)
         self.update_timer.start(1000)  # Every second
         
-        logger.info(f"Simple overlay window created: {width}x{height} at ({x}, {y}) debug={debug_bg}")
+        # Diagnostics
+        self._paint_count = 0
+        logger.info(f"Simple overlay window created: {width}x{height} at ({x}, {y}) debug={debug_bg} force_basic={self.force_basic}")
         try:
             hwnd_dbg = int(self.winId())
             logger.info(f"Overlay HWND={hwnd_dbg} flags={hex(int(self.windowFlags()))} attrs: translucent={self.testAttribute(Qt.WA_TranslucentBackground)} autoFill={self.autoFillBackground()}")
@@ -119,12 +136,30 @@ class SimpleOverlayWindow(QWidget):
             logger.debug(f"Windows transparency failed: {e}")
     
     def add_dot(self, x, y):
-        """Add a tap dot at window-relative coordinates."""
+        """Add a tap dot at window-relative coordinates.
+
+        If coordinates appear far outside expected widget geometry (possibly due to
+        high-DPI scaling mismatch), attempt a heuristic correction using devicePixelRatio.
+        """
         timestamp = time.time()
-        # x, y are already window-relative coordinates (0 to window_width/height)
-        # Just store them directly for paintEvent
+        w = self.width()
+        h = self.height()
+        dpr = self.devicePixelRatioF() if hasattr(self, 'devicePixelRatioF') else 1.0
+
+        orig_x, orig_y = x, y
+        # Heuristic: if coordinates exceed size by >25%, assume they are in physical pixels and convert
+        if (x > w * 1.25 or y > h * 1.25) and dpr > 1.01:
+            x = x / dpr
+            y = y / dpr
+            logger.info(f"Heuristic DPI adjust applied: ({orig_x},{orig_y}) -> ({x:.1f},{y:.1f}) with dpr={dpr:.2f}")
+
+        # Clamp to bounds +/- small margin
+        if x < -10 or y < -10 or x > w + 10 or y > h + 10:
+            logger.warning(f"Dropped dot out of bounds after adjustment ({x},{y}) widget={w}x{h} dpr={dpr:.2f}")
+            return
+
         self.dots.append((x, y, timestamp))
-        logger.debug(f"Added dot at window-relative ({x}, {y})")
+        logger.debug(f"Added dot at window-relative ({x}, {y}) (orig:{orig_x},{orig_y}) w={w} h={h} dpr={dpr:.2f}")
         
         # Force immediate repaint
         self.update()
@@ -184,6 +219,14 @@ class SimpleOverlayWindow(QWidget):
                 painter.drawRect(0, 0, self.width()-1, self.height()-1)
 
             current_time = time.time()
+            self._paint_count += 1
+            if self._paint_count <= 5 or self._paint_count % 100 == 0:
+                # Log initial few paints and then every 100th for diagnostics
+                try:
+                    dpr = self.devicePixelRatioF() if hasattr(self, 'devicePixelRatioF') else 1.0
+                    logger.debug(f"paintEvent #{self._paint_count} dots={len(self.dots)} size={self.width()}x{self.height()} dpr={dpr:.2f}")
+                except Exception:
+                    pass
             for x, y, timestamp in self.dots:
                 if x < 0 or y < 0 or x > self.screen_width + 5 or y > self.screen_height + 5:
                     logger.debug(f"Dot out of bounds skipped ({x},{y}) screen {self.screen_width}x{self.screen_height}")
