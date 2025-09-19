@@ -89,72 +89,100 @@ class ScreenshotHTTPServer:
             super().__init__(request, client_address, server)
             
         def do_GET(self):
-            if self.path == '/capture' or self.path == '/':
-                try:
-                    # Use the new handle_http_trigger function with cooldown and callback
-                    result = handle_http_trigger(callback=self.screenshot_callback)
+            try:
+                # Normalize path (strip query string)
+                path = self.path.split('?')[0]
+                user_agent = self.headers.get('User-Agent', '')
+                is_autohotkey = 'Slide-Tap-Hotkey' in user_agent
+                
+                # /ping => health only
+                if path == '/ping':
+                    self.send_response(200)
+                    self.send_header('Content-type', 'text/plain; charset=utf-8')
+                    self.send_header('Cache-Control', 'no-cache')
+                    self.end_headers()
+                    body = 'OK'
+                    try:
+                        self.wfile.write(body.encode('utf-8'))
+                    except (ConnectionResetError, BrokenPipeError):
+                        pass
+                    logger.info(f"Ping request from {'AHK' if is_autohotkey else 'client'} -> OK")
+                    return
+                
+                # /capture => perform screenshot (AHK & browser both allowed)
+                if path == '/capture':
                     global trigger_counter
+                    result = handle_http_trigger(callback=self.screenshot_callback)
                     trigger_counter += 1
                     trig_id = trigger_counter
-                    logger.info(f"HTTPTrigger[{trig_id}] result='{result}' user_agent='{user_agent}' is_autohotkey={is_autohotkey}")
-                    
-                    # Detect if request is from AutoHotkey
-                    user_agent = self.headers.get('User-Agent', '')
-                    is_autohotkey = 'Slide-Tap-Hotkey' in user_agent
-                    
-                    # Send success response
+                    logger.info(f"HTTPTrigger[{trig_id}] path=/capture user_agent='{user_agent}' ahk={is_autohotkey} result='{result}'")
                     self.send_response(200)
-                    
                     if is_autohotkey:
-                        # Simple text response for AutoHotkey
                         self.send_header('Content-type', 'text/plain; charset=utf-8')
                         self.send_header('Cache-Control', 'no-cache')
                         self.end_headers()
                         try:
                             self.wfile.write(result.encode('utf-8'))
-                        except (ConnectionResetError, BrokenPipeError) as e:
-                            logger.warning(f"Client disconnected while sending AutoHotkey response: {e}")
-                        logger.info(f"Screenshot triggered via AutoHotkey: {user_agent}")
+                        except (ConnectionResetError, BrokenPipeError):
+                            pass
                     else:
-                        # HTML response for browsers
                         self.send_header('Content-type', 'text/html; charset=utf-8')
                         self.send_header('Cache-Control', 'no-cache')
                         self.end_headers()
-                        
-                        # Simple HTML response without complex styling that might cause parsing issues
                         port = self.server.server_address[1]
-                        response_html = f"""<!DOCTYPE html>
-<html>
-<head>
-    <title>Screenshot Result</title>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-</head>
-<body style="background: #2E3440; color: white; text-align: center; padding: 50px;">
-    <h1>Screenshot Trigger</h1>
-    <p style="color: #A3BE8C; font-size: 18px;">{result}</p>
-    <button onclick="location.reload()" style="background: #5E81AC; color: white; border: none; padding: 15px 30px; font-size: 16px; cursor: pointer;">Try Again</button>
-    <hr style="margin: 40px 0; border-color: #4C566A;">
-    <h3>Bookmark This Page</h3>
-    <p>Quick access: <strong>http://localhost:{port}</strong></p>
-    <h3>AutoHotkey Integration</h3>
-    <p>For Ctrl+B hotkey support, run: <strong>slide_tap_hotkey.ahk</strong></p>
-</body>
-</html>"""
-                        
+                        response_html = f"""<!DOCTYPE html><html><head><title>Capture Result</title><meta charset='utf-8'></head><body style='background:#2E3440;color:white;text-align:center;padding:40px;'>
+<h2>Capture Result</h2><p style='color:#A3BE8C;font-size:18px;'>{result}</p>
+<p><a href='/capture' style='color:#88C0D0;'>Capture Again</a></p>
+<p>Hotkey users: run slide_tap_hotkey.ahk and press Ctrl+B</p>
+<hr><p>Status: <a style='color:#81A1C1;' href='/'>Home</a> | <a style='color:#81A1C1;' href='/ping'>Ping</a></p>
+</body></html>"""
                         try:
                             self.wfile.write(response_html.encode('utf-8'))
-                        except (ConnectionResetError, BrokenPipeError) as e:
-                            logger.warning(f"Client disconnected while sending HTML response: {e}")
-                        logger.info("Screenshot triggered via browser")
-                except Exception as e:
-                    logger.error(f"HTTP trigger error: {e}")
-                    try:
-                        self.send_error(500, f"Screenshot capture failed: {str(e)}")
-                    except Exception:
-                        pass
-            else:
-                self.send_error(404, "Use / to trigger screenshot capture")
+                        except (ConnectionResetError, BrokenPipeError):
+                            pass
+                    return
+                
+                # Root '/' => status page only (NO CAPTURE)
+                if path == '/':
+                    self.send_response(200)
+                    if is_autohotkey:
+                        # AHK should prefer /ping; if it hits '/', give short hint
+                        self.send_header('Content-type', 'text/plain; charset=utf-8')
+                        self.end_headers()
+                        try:
+                            self.wfile.write(b"Slide Tap Helper OK - use /capture for screenshots")
+                        except (ConnectionResetError, BrokenPipeError):
+                            pass
+                    else:
+                        self.send_header('Content-type', 'text/html; charset=utf-8')
+                        self.end_headers()
+                        port = self.server.server_address[1]
+                        html = f"""<!DOCTYPE html><html><head><title>Slide Tap Helper</title><meta charset='utf-8'></head>
+<body style='background:#2E3440;color:white;text-align:center;padding:40px;'>
+<h1>Slide Tap Helper</h1>
+<p>Status: Running on port {port}</p>
+<p><strong>Endpoints:</strong></p>
+<ul style='list-style:none;'>
+<li><code>/ping</code> - health check</li>
+<li><code>/capture</code> - trigger screenshot</li>
+</ul>
+<p>AutoHotkey users: script will call /capture only on Ctrl+B.</p>
+</body></html>"""
+                        try:
+                            self.wfile.write(html.encode('utf-8'))
+                        except (ConnectionResetError, BrokenPipeError):
+                            pass
+                    logger.info(f"Status page served to {'AHK' if is_autohotkey else 'browser'}")
+                    return
+                
+                # Unknown path
+                self.send_error(404, "Unknown endpoint. Use /ping or /capture")
+            except Exception as e:
+                logger.error(f"HTTP handler error: {e}")
+                try:
+                    self.send_error(500, "Internal server error")
+                except Exception:
+                    pass
                 
         def log_message(self, format, *args):
             # Reduce HTTP server logging noise

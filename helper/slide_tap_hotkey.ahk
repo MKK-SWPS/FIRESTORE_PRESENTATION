@@ -14,7 +14,9 @@
 #SingleInstance Force
 
 ; Configuration
-HELPER_URL := "http://localhost:8889"
+HELPER_BASE := "http://localhost:8889"
+HELPER_CAPTURE_URL := HELPER_BASE . "/capture"
+HELPER_PING_URL := HELPER_BASE . "/ping"
 HELPER_PORT := 8889
 HOTKEY_COMBO := "^b"  ; Ctrl+B
 
@@ -23,7 +25,7 @@ APP_NAME := "Slide Tap Hotkey Helper"
 APP_VERSION := "v2025.09.19"
 
 ; Tray icon setup
-A_IconTip := APP_NAME . " " . APP_VERSION . "`nHotkey: Ctrl+B`nTarget: " . HELPER_URL
+A_IconTip := APP_NAME . " " . APP_VERSION . "`nHotkey: Ctrl+B`nCapture: /capture`nPing: /ping"
 
 ; Create tray menu
 TrayMenu := A_TrayMenu
@@ -45,8 +47,9 @@ Global CaptureCounter := 0
 ; Register the hotkey
 try {
     Hotkey(HOTKEY_COMBO, TriggerScreenshot)
-    ShowTrayTip("Hotkey Registered", "Ctrl+B hotkey is now active`nTarget: " . HELPER_URL, 3000)
-    TestConnectionSilent()
+    ShowTrayTip("Hotkey Registered", "Ctrl+B active. Using /capture endpoint.", 3000)
+    ; Perform a non-capturing ping only
+    PingHelperSilent()
 } catch Error as e {
     ShowTrayTip("Hotkey Error", "Failed to register Ctrl+B: " . e.Message, 5000, 3)
     ExitApp()
@@ -54,7 +57,7 @@ try {
 
 ; Main hotkey function
 TriggerScreenshot(*) {
-    global LastTriggerTime, TriggerCount, HELPER_URL, CaptureCounter
+    global LastTriggerTime, TriggerCount, HELPER_CAPTURE_URL, CaptureCounter
     
     ; Prevent rapid triggering (debounce)
     CurrentTime := A_TickCount
@@ -69,14 +72,14 @@ TriggerScreenshot(*) {
     CaptureCounter++
     
     ; Show immediate feedback
-    ShowTrayTip("Capturing Screenshot", "Sending capture request to Slide Tap Helper...", 2000)
+    ShowTrayTip("Capturing Screenshot", "Requesting /capture from helper...", 2000)
     
     ; Send HTTP request to helper
     try {
         ; Create HTTP request
         http := ComObject("WinHttp.WinHttpRequest.5.1")
         ; Build URL with cache buster & capture id
-        url := HELPER_URL . "?t=" . A_TickCount . "&cid=" . CaptureCounter
+    url := HELPER_CAPTURE_URL . "?t=" . A_TickCount . "&cid=" . CaptureCounter
         http.Open("GET", url, false)
         http.SetRequestHeader("User-Agent", "Slide-Tap-Hotkey/" . APP_VERSION)
         ; Increase timeouts (resolve, connect, send, receive) to 15000ms
@@ -103,14 +106,14 @@ TriggerScreenshot(*) {
 
 ; Test connection function
 TestConnection(*) {
-    global HELPER_URL, ConnectionStatus
+    global HELPER_PING_URL, ConnectionStatus
     
-    ShowTrayTip("Testing Connection", "Checking connection to " . HELPER_URL . "...", 2000)
+    ShowTrayTip("Testing Connection", "Pinging helper (no capture)...", 2000)
     
     try {
         http := ComObject("WinHttp.WinHttpRequest.5.1")
-        http.Open("GET", HELPER_URL, false)
-        http.SetRequestHeader("User-Agent", "Slide-Tap-Hotkey/" . APP_VERSION . " (test)")
+    http.Open("GET", HELPER_PING_URL, false)
+    http.SetRequestHeader("User-Agent", "Slide-Tap-Hotkey/" . APP_VERSION . " (ping)")
         http.SetTimeouts(3000, 3000, 3000, 3000)
         http.Send()
         
@@ -129,16 +132,14 @@ TestConnection(*) {
 }
 
 ; Silent connection test (no notifications)
-TestConnectionSilent() {
-    global HELPER_URL, ConnectionStatus
-    
+PingHelperSilent() {
+    global HELPER_PING_URL, ConnectionStatus
     try {
         http := ComObject("WinHttp.WinHttpRequest.5.1")
-        http.Open("GET", HELPER_URL, false)
-        http.SetRequestHeader("User-Agent", "Slide-Tap-Hotkey/" . APP_VERSION . " (silent)")
+        http.Open("GET", HELPER_PING_URL, false)
+        http.SetRequestHeader("User-Agent", "Slide-Tap-Hotkey/" . APP_VERSION . " (silent-ping)")
         http.SetTimeouts(2000, 2000, 2000, 2000)
         http.Send()
-        
         ConnectionStatus := (http.Status == 200) ? "Connected" : "Warning"
     } catch {
         ConnectionStatus := "Disconnected"
@@ -147,11 +148,12 @@ TestConnectionSilent() {
 
 ; Show status information
 ShowStatus(*) {
-    global TriggerCount, LastTriggerTime, ConnectionStatus, HELPER_URL, HOTKEY_COMBO
+    global TriggerCount, LastTriggerTime, ConnectionStatus, HELPER_CAPTURE_URL, HOTKEY_COMBO
     
     StatusText := APP_NAME . " " . APP_VERSION . "`n`n"
     StatusText .= "Hotkey: " . HOTKEY_COMBO . "`n"
-    StatusText .= "Target: " . HELPER_URL . "`n"
+    StatusText .= "Capture: " . HELPER_CAPTURE_URL . "`n"
+    StatusText .= "Ping: " . HELPER_PING_URL . "`n"
     StatusText .= "Status: " . ConnectionStatus . "`n"
     StatusText .= "Triggers: " . TriggerCount . "`n"
     
