@@ -22,7 +22,7 @@ import logging
 
 from PySide6.QtWidgets import QWidget
 from PySide6.QtCore import Qt, QTimer, QRect
-from PySide6.QtGui import QPainter, QBrush, QColor, QPen
+from PySide6.QtGui import QPainter, QBrush, QColor, QPen, QGuiApplication
 
 # Windows API imports (only on Windows)
 if platform.system() == "Windows":
@@ -72,16 +72,14 @@ class SimpleOverlayWindow(QWidget):
         flags = (Qt.WindowStaysOnTopHint | Qt.FramelessWindowHint | 
                 Qt.WindowTransparentForInput | Qt.Tool)
         self.setWindowFlags(flags)
-        
-        # Set transparency attributes - CRITICAL: prevent black background
+
+        # Transparency attributes
         self.setAttribute(Qt.WA_TranslucentBackground, True)
-        self.setAttribute(Qt.WA_NoSystemBackground, True)  # Prevent Qt from painting black background
         self.setAttribute(Qt.WA_ShowWithoutActivating, True)
         self.setAttribute(Qt.WA_TransparentForMouseEvents, True)
-        
-        # CRITICAL: Prevent any background painting
-        self.setStyleSheet("background: transparent;")
-        self.setAutoFillBackground(False)  # Don't auto-fill with background color
+        # Avoid forcing WA_NoSystemBackground (can cause black on some GPUs) and instead clear in paint
+        self.setAutoFillBackground(False)
+        self.setStyleSheet("background: rgba(0,0,0,1);")  # Almost fully transparent (alpha=1)
         
         # Apply Windows-specific transparency and click-through
         if HAS_WIN32:
@@ -93,6 +91,11 @@ class SimpleOverlayWindow(QWidget):
         self.update_timer.start(1000)  # Every second
         
         logger.info(f"Simple overlay window created: {width}x{height} at ({x}, {y}) debug={debug_bg}")
+        try:
+            hwnd_dbg = int(self.winId())
+            logger.info(f"Overlay HWND={hwnd_dbg} flags={hex(int(self.windowFlags()))} attrs: translucent={self.testAttribute(Qt.WA_TranslucentBackground)} autoFill={self.autoFillBackground()}")
+        except Exception:
+            pass
     
     def _apply_windows_transparency(self):
         """Apply Windows-specific transparency for click-through behavior."""
@@ -165,40 +168,35 @@ class SimpleOverlayWindow(QWidget):
             self.update()
     
     def paintEvent(self, event):
-        """Paint the overlay with dots."""
+        """Paint the overlay with dots ensuring full transparency clearing first."""
         painter = QPainter(self)
-        
         try:
-            # Enable anti-aliasing for smooth dots
-            painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-            
-            # Debug border only - no background fill
+            # Explicitly clear background for true transparency
+            painter.setCompositionMode(QPainter.CompositionMode_Source)
+            painter.fillRect(self.rect(), Qt.transparent)
+            painter.setCompositionMode(QPainter.CompositionMode_SourceOver)
+
+            painter.setRenderHint(QPainter.Antialiasing, True)
+
             if self.debug_bg:
-                # Draw a thin border around the window edge for debugging
-                painter.setPen(QPen(QColor(255, 255, 0, 100), 2))  # Semi-transparent yellow border
-                painter.setBrush(Qt.NoBrush)  # No fill
-                painter.drawRect(1, 1, self.width() - 2, self.height() - 2)
-            
-            # Draw dots with fade effect
+                painter.setPen(QPen(QColor(255, 255, 0, 120), 1))
+                painter.setBrush(Qt.NoBrush)
+                painter.drawRect(0, 0, self.width()-1, self.height()-1)
+
             current_time = time.time()
             for x, y, timestamp in self.dots:
+                if x < 0 or y < 0 or x > self.screen_width + 5 or y > self.screen_height + 5:
+                    logger.debug(f"Dot out of bounds skipped ({x},{y}) screen {self.screen_width}x{self.screen_height}")
+                    continue
                 age = current_time - timestamp
                 if age < self.DOT_DURATION:
-                    # Calculate fade
                     fade_factor = 1.0 - (age / self.DOT_DURATION)
                     alpha = int(255 * fade_factor)
-                    
-                    # Set up color with alpha
                     color = QColor(self.dot_color)
                     color.setAlpha(alpha)
-                    
-                    # Draw filled circle (no border for cleaner look)
                     painter.setBrush(QBrush(color))
                     painter.setPen(Qt.NoPen)
-                    # x,y are already window-relative coordinates
-                    painter.drawEllipse(int(x - self.dot_radius), int(y - self.dot_radius), 
-                                      self.dot_radius * 2, self.dot_radius * 2)
-        
+                    painter.drawEllipse(int(x - self.dot_radius), int(y - self.dot_radius), self.dot_radius*2, self.dot_radius*2)
         finally:
             painter.end()
     

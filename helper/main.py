@@ -68,55 +68,62 @@ from PySide6.QtGui import QPixmap
 from alternative_triggers import ScreenshotHTTPServer, FileWatcherTrigger
 
 # Configure logging
-def setup_logging(debug=False):
-    """Configure logging to file with continuous flushing."""
-    # Create logs directory if it doesn't exist
-    log_dir = Path(__file__).parent / 'logs'
-    log_dir.mkdir(exist_ok=True)
-    
-    # Create log filename with timestamp
+def setup_logging(debug: bool = False):
+    """Configure logging to file with continuous flushing.
+
+    When frozen (PyInstaller), place logs next to the executable in a 'logs' folder.
+    When running from source, place logs relative to this file as before.
+    """
+    try:
+        if getattr(sys, 'frozen', False):  # Running as bundled exe
+            base_dir = Path(sys.executable).parent
+        else:
+            base_dir = Path(__file__).parent
+        log_dir = base_dir / 'logs'
+        log_dir.mkdir(exist_ok=True)
+    except Exception:
+        # Fallback to current working directory
+        log_dir = Path.cwd() / 'logs'
+        log_dir.mkdir(exist_ok=True)
+
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     log_file = log_dir / f'slide_tap_helper_{timestamp}.log'
-    
-    # Configure logging format
+
     log_format = '%(asctime)s - %(levelname)s - %(message)s'
-    
-    # Custom handler that flushes after each write
+
     class FlushFileHandler(logging.FileHandler):
         def emit(self, record):
             super().emit(record)
-            self.flush()  # Flush after every log entry
-    
-    # Set up file handler with auto-flush
+            try:
+                self.flush()
+            except Exception:
+                pass
+
     file_handler = FlushFileHandler(log_file, encoding='utf-8')
     file_handler.setFormatter(logging.Formatter(log_format))
-    
-    # Configure root logger
+
     root_logger = logging.getLogger()
     root_logger.setLevel(logging.DEBUG if debug else logging.INFO)
-    
-    # Remove any existing handlers (console output)
     root_logger.handlers.clear()
-    
-    # Add file handler
     root_logger.addHandler(file_handler)
-    
-    # Also create a latest.log reference for easy access
-    latest_log = log_dir / 'latest.log'
+
+    # Mirror latest file info (avoid symlink for Windows)
     try:
+        latest_log = log_dir / 'latest.log'
         with open(latest_log, 'w', encoding='utf-8') as f:
             f.write(f"Current log file: {log_file.name}\n")
             f.write(f"Full path: {log_file.absolute()}\n")
+            f.write(f"Running frozen: {getattr(sys,'frozen',False)}\n")
     except Exception:
         pass
-    
-    # Log the startup info immediately
+
     logger = logging.getLogger(__name__)
     logger.info("=" * 60)
     logger.info(f"Log file created: {log_file.absolute()}")
     logger.info(f"Logs directory: {log_dir.absolute()}")
+    logger.info(f"Frozen mode: {getattr(sys,'frozen',False)} executable={getattr(sys,'executable',None)}")
     logger.info("=" * 60)
-    
+    logger.debug("First flush test entry - if you see this promptly, flushing works.")
     return logger
 
 # Initialize logger (will be replaced in main)
@@ -615,22 +622,20 @@ class DesktopHelper:
         
         logger.info(f"📐 Normalized coordinates: x={x:.3f}, y={y:.3f}")
         
-        # Convert to absolute coordinates based on current monitor
+        # Convert to window-relative coordinates (overlay origin == monitor origin)
         monitor, _ = self._get_monitor_info()
-        abs_x = int(x * monitor.width) + monitor.x
-        abs_y = int(y * monitor.height) + monitor.y
+        rel_x = int(x * monitor.width)
+        rel_y = int(y * monitor.height)
+        logger.info(f"🖥️ Relative coordinates: ({rel_x}, {rel_y}) within {monitor.width}x{monitor.height}")
         
-        logger.info(f"🖥️ Absolute coordinates: ({abs_x}, {abs_y}) on monitor {monitor.width}x{monitor.height}")
-        
-        # Add dot to overlay
+        # Add dot to overlay using relative coordinates
         if self.overlay:
-            self.overlay.add_dot(abs_x, abs_y)
-            logger.info(f"✅ Dot added to overlay at ({abs_x}, {abs_y})")
+            self.overlay.add_dot(rel_x, rel_y)
+            logger.info(f"✅ Dot added to overlay at ({rel_x}, {rel_y})")
+            logger.debug(f"Added dot at ({rel_x}, {rel_y}) from normalized ({x:.3f}, {y:.3f})")
+            logger.info("✅ Dot added successfully! Should be visible on overlay.")
         else:
             logger.error("❌ Overlay is None - cannot add dot!")
-        
-        logger.debug(f"Added dot at ({abs_x}, {abs_y}) from normalized ({x:.3f}, {y:.3f})")
-        logger.info(f"✅ Dot added successfully! Should be visible on overlay.")
         
         # Ensure overlay is visible (but don't force focus in production)
         if self.config.get('overlay_debug_bg', False):
@@ -679,9 +684,13 @@ class DesktopHelper:
                 # Alt+F4 (should work by default, but let's ensure it)
                 self.alt_f4 = QShortcut(QKeySequence("Alt+F4"), self.overlay)
                 self.alt_f4.activated.connect(emergency_close)
-                
+
                 logger.info(f"✅ Simple overlay created on monitor {monitor_index} (debug={debug_bg})")
                 logger.info("📌 Emergency exits: ESC, Ctrl+Alt+X, or Alt+F4")
+                # Optional test dot
+                if self.config.get('overlay_test_dot', True):
+                    self.overlay.add_dot(monitor.width//2, monitor.height//2)
+                    logger.info("🟡 Placed startup test dot (center). Disable with overlay_test_dot:false in config.json")
                 
             else:
                 # Linux fallback
@@ -698,6 +707,13 @@ class DesktopHelper:
                 self.overlay.clear_dots()
             except Exception:
                 pass
+            # Re-add test dot after clear if enabled
+            if self.config.get('overlay_test_dot', True):
+                try:
+                    mon, _ = self._get_monitor_info()
+                    self.overlay.add_dot(mon.width//2, mon.height//2)
+                except Exception:
+                    pass
                 
         except Exception as e:
             logger.error(f"Failed to create overlay window: {e}")
