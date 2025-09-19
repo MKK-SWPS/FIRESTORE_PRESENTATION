@@ -384,8 +384,14 @@ class DesktopHelper:
         
     def _load_config(self, config_path):
         """Load configuration from JSON file."""
+        # Check if custom config exists, otherwise use example
         if not os.path.exists(config_path):
-            raise FileNotFoundError(f"Configuration file not found: {config_path}")
+            if config_path == 'config.json' and os.path.exists('config.example.json'):
+                logger.warning("config.json not found, using config.example.json template")
+                logger.warning("Please copy config.example.json to config.json and update with your Firebase details")
+                config_path = 'config.example.json'
+            else:
+                raise FileNotFoundError(f"Configuration file not found: {config_path}")
         
         with open(config_path, 'r') as f:
             config = json.load(f)

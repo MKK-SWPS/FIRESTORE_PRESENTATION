@@ -15,7 +15,7 @@ a = Analysis(
     pathex=[helper_dir],
     binaries=[],
     datas=[
-        ('config.json', '.'),
+        ('config.example.json', '.'),
     ],
     hiddenimports=[
         # Firebase and Google Cloud
