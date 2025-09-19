@@ -607,8 +607,8 @@ class DesktopHelper:
                 # Always use simple mode for now to prevent blocking
                 self.overlay = SimpleOverlayWindow(
                     monitor.x, monitor.y, monitor.width, monitor.height,
-                    self.config.get('dot_color', '#FF0000'),
-                    self.config.get('dot_radius_px', 15),
+                    self.config.get('dot_color', '#FFFF00'),  # Yellow highlighter default
+                    self.config.get('dot_radius_px', 20),  # Larger for visibility
                     self.config.get('fade_ms', 10000), 
                     debug_bg=debug_bg
                 )

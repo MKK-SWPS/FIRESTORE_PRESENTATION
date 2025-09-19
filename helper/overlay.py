@@ -44,9 +44,15 @@ class SimpleOverlayWindow(QWidget):
     """Simple overlay window without layered transparency - more reliable."""
     
     def __init__(self, x: int, y: int, width: int, height: int, 
-                 dot_color: str = '#FF0000', dot_radius: int = 15, fade_ms: int = 10000,
+                 dot_color: str = '#FFFF00', dot_radius: int = 20, fade_ms: int = 10000,
                  debug_bg: bool = False):
         super().__init__()
+        
+        # Store monitor geometry for coordinate conversion
+        self.screen_x = x
+        self.screen_y = y
+        self.screen_width = width
+        self.screen_height = height
         
         # Configuration
         self.dot_color = QColor(dot_color)
@@ -63,29 +69,28 @@ class SimpleOverlayWindow(QWidget):
         self.setGeometry(x, y, width, height)
         
         # CRITICAL FIX: Proper window flags for transparency and click-through
-        if debug_bg:
-            # Debug mode: semi-transparent, closeable, stays on top
-            flags = Qt.WindowStaysOnTopHint | Qt.FramelessWindowHint
-            self.setWindowOpacity(0.3)  # Semi-transparent for visibility
-        else:
-            # Production mode: fully transparent, click-through, no taskbar
-            flags = (Qt.WindowStaysOnTopHint | Qt.FramelessWindowHint | 
-                    Qt.WindowTransparentForInput | Qt.Tool)
-            self.setWindowOpacity(1.0)
-            
+        # Always use click-through, even in debug mode
+        flags = (Qt.WindowStaysOnTopHint | Qt.FramelessWindowHint | 
+                Qt.WindowTransparentForInput | Qt.Tool)
         self.setWindowFlags(flags)
         
         # Set transparency attributes
         self.setAttribute(Qt.WA_TranslucentBackground, True)
         self.setAttribute(Qt.WA_NoSystemBackground, True)
         self.setAttribute(Qt.WA_ShowWithoutActivating, True)
+        self.setAttribute(Qt.WA_TransparentForMouseEvents, True)  # Extra click-through
+        
+        # Set window opacity
+        if debug_bg:
+            self.setWindowOpacity(0.2)  # Very faint in debug mode but still click-through
+        else:
+            self.setWindowOpacity(1.0)
         
         # CRITICAL: Set stylesheet for proper transparency
-        if not debug_bg:
-            self.setStyleSheet("background: transparent;")
+        self.setStyleSheet("background: transparent;")
             
         # Apply Windows-specific click-through if available
-        if HAS_WIN32 and not debug_bg:
+        if HAS_WIN32:
             self._apply_windows_transparency()
             
         # Timer for cleanup
@@ -116,38 +121,38 @@ class SimpleOverlayWindow(QWidget):
             if hwnd:
                 # Get current extended style
                 extended_style = win32gui.GetWindowLong(hwnd, win32con.GWL_EXSTYLE)
-                # Add transparent and layered flags
+                # Add transparent, layered, and no-activate flags
                 new_style = (extended_style | win32con.WS_EX_TRANSPARENT | 
-                           win32con.WS_EX_LAYERED | win32con.WS_EX_TOPMOST)
+                           win32con.WS_EX_LAYERED | win32con.WS_EX_TOPMOST | 
+                           win32con.WS_EX_NOACTIVATE)
                 win32gui.SetWindowLong(hwnd, win32con.GWL_EXSTYLE, new_style)
                 # Set layer attributes for transparency
                 win32gui.SetLayeredWindowAttributes(hwnd, 0, 255, win32con.LWA_ALPHA)
-                logger.debug("Applied Windows click-through transparency")
+                logger.debug(f"Applied Windows click-through styles to HWND {hwnd}")
         except Exception as e:
             logger.debug(f"Windows transparency failed: {e}")
     
     def add_dot(self, x, y):
-        """Add a new dot at the specified coordinates."""
+        """Add a tap dot at absolute screen coordinates, converting to window-relative."""
         timestamp = time.time()
-        # Convert absolute coordinates to relative (since overlay covers monitor)
-        monitor_x = self.geometry().x()
-        monitor_y = self.geometry().y()
-        relative_x = x - monitor_x
-        relative_y = y - monitor_y
+        # Convert absolute screen coordinates to window-relative coordinates
+        relative_x = x - self.screen_x
+        relative_y = y - self.screen_y
         
-        self.dots.append((relative_x, relative_y, timestamp))
-        logger.info(f"✅ Dot added to simple overlay at ({relative_x}, {relative_y}) (absolute: {x}, {y})")
-        
-        # Force immediate repaint
-        self.update()
-        self.repaint()
-        
-        # Ensure visibility - but don't force focus in production
-        if not self.isVisible():
-            self.show()
-        if self.debug_bg:
-            self.raise_()
-            self.activateWindow()
+        # Bounds checking
+        if 0 <= relative_x <= self.screen_width and 0 <= relative_y <= self.screen_height:
+            self.dots.append((relative_x, relative_y, timestamp))
+            logger.info(f"✅ Dot added at window-relative ({relative_x}, {relative_y}) from absolute ({x}, {y})")
+            
+            # Force immediate repaint
+            self.update()
+            self.repaint()
+            
+            # Ensure visibility - but don't force focus in production
+            if not self.isVisible():
+                self.show()
+        else:
+            logger.warning(f"Dot at ({x}, {y}) is outside overlay bounds (relative: {relative_x}, {relative_y})")
     
     def clear_dots(self):
         """Remove all dots from the overlay."""
@@ -177,16 +182,16 @@ class SimpleOverlayWindow(QWidget):
         painter = QPainter(self)
         
         try:
-            # Enable anti-aliasing
+            # Enable anti-aliasing for smooth dots
             painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
             
             # Clear background first
             painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_Source)
             if self.debug_bg:
-                # Debug: semi-transparent dark background with red border
-                painter.fillRect(self.rect(), QColor(50, 50, 50, 100))
-                painter.setPen(QPen(QColor(255, 0, 0), 3))
-                painter.drawRect(self.rect().adjusted(1, 1, -1, -1))
+                # Debug: very faint background with yellow border
+                painter.fillRect(self.rect(), QColor(100, 100, 100, 30))  # Very transparent gray
+                painter.setPen(QPen(QColor(255, 255, 0), 1))  # Yellow border in debug
+                painter.drawRect(self.rect().adjusted(0, 0, -1, -1))
             else:
                 # Transparent background
                 painter.fillRect(self.rect(), QColor(0, 0, 0, 1))
@@ -207,9 +212,9 @@ class SimpleOverlayWindow(QWidget):
                     color = QColor(self.dot_color)
                     color.setAlpha(alpha)
                     
-                    # Draw dot
-                    painter.setPen(QPen(color, 2))
+                    # Draw filled circle (no border for cleaner look)
                     painter.setBrush(QBrush(color))
+                    painter.setPen(Qt.NoPen)
                     painter.drawEllipse(int(x - self.dot_radius), int(y - self.dot_radius), 
                                       self.dot_radius * 2, self.dot_radius * 2)
         
