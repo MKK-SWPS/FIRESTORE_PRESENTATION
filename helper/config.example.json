@@ -40,7 +40,7 @@
   "_enable_hotkey_note": "Set to true to attempt global hotkey registration (may fail on some systems)",
   "overlay_mode": "simple",
   "_overlay_mode_note": "auto=try layered then fallback, simple=always simple QWidget, layered=force advanced (may error)",
-  "overlay_debug_bg": true,
+  "overlay_debug_bg": false,
   "_overlay_debug_bg_note": "If true draws semi-transparent dark background so you can verify overlay is visible",
   "ignore_past_responses_seconds": 60,
   "_ignore_past_responses_seconds_note": "Ignore Firestore responses older than this many seconds before helper start to prevent replay"

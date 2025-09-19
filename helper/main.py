@@ -68,7 +68,45 @@ from PySide6.QtGui import QPixmap
 from alternative_triggers import ScreenshotHTTPServer, FileWatcherTrigger
 
 # Configure logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+def setup_logging(debug=False):
+    """Configure logging to file instead of console."""
+    # Create logs directory if it doesn't exist
+    log_dir = Path(__file__).parent / 'logs'
+    log_dir.mkdir(exist_ok=True)
+    
+    # Create log filename with timestamp
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    log_file = log_dir / f'slide_tap_helper_{timestamp}.log'
+    
+    # Configure logging format
+    log_format = '%(asctime)s - %(levelname)s - %(message)s'
+    
+    # Set up file handler
+    file_handler = logging.FileHandler(log_file, encoding='utf-8')
+    file_handler.setFormatter(logging.Formatter(log_format))
+    
+    # Configure root logger
+    root_logger = logging.getLogger()
+    root_logger.setLevel(logging.DEBUG if debug else logging.INFO)
+    
+    # Remove any existing handlers (console output)
+    root_logger.handlers.clear()
+    
+    # Add file handler
+    root_logger.addHandler(file_handler)
+    
+    # Also create a latest.log reference for easy access
+    latest_log = log_dir / 'latest.log'
+    try:
+        # On Windows, we can't use symlinks easily, so copy the filename
+        with open(latest_log, 'w', encoding='utf-8') as f:
+            f.write(f"Current log file: {log_file.name}\n")
+    except Exception:
+        pass
+    
+    return logging.getLogger(__name__)
+
+# Initialize logger (will be replaced in main)
 logger = logging.getLogger(__name__)
 
 
