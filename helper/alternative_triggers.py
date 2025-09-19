@@ -27,6 +27,7 @@ except ImportError:
 # Global variables for HTTP trigger cooldown
 last_http_trigger_time = 0
 HTTP_TRIGGER_COOLDOWN_MS = 2000  # 2 second cooldown between captures
+trigger_counter = 0
 
 logger = logging.getLogger(__name__)
 
@@ -92,6 +93,10 @@ class ScreenshotHTTPServer:
                 try:
                     # Use the new handle_http_trigger function with cooldown and callback
                     result = handle_http_trigger(callback=self.screenshot_callback)
+                    global trigger_counter
+                    trigger_counter += 1
+                    trig_id = trigger_counter
+                    logger.info(f"HTTPTrigger[{trig_id}] result='{result}' user_agent='{user_agent}' is_autohotkey={is_autohotkey}")
                     
                     # Detect if request is from AutoHotkey
                     user_agent = self.headers.get('User-Agent', '')
@@ -105,10 +110,11 @@ class ScreenshotHTTPServer:
                         self.send_header('Content-type', 'text/plain; charset=utf-8')
                         self.send_header('Cache-Control', 'no-cache')
                         self.end_headers()
-                        
-                        self.wfile.write(result.encode('utf-8'))
+                        try:
+                            self.wfile.write(result.encode('utf-8'))
+                        except (ConnectionResetError, BrokenPipeError) as e:
+                            logger.warning(f"Client disconnected while sending AutoHotkey response: {e}")
                         logger.info(f"Screenshot triggered via AutoHotkey: {user_agent}")
-                        
                     else:
                         # HTML response for browsers
                         self.send_header('Content-type', 'text/html; charset=utf-8')
@@ -136,12 +142,17 @@ class ScreenshotHTTPServer:
 </body>
 </html>"""
                         
-                        self.wfile.write(response_html.encode('utf-8'))
+                        try:
+                            self.wfile.write(response_html.encode('utf-8'))
+                        except (ConnectionResetError, BrokenPipeError) as e:
+                            logger.warning(f"Client disconnected while sending HTML response: {e}")
                         logger.info("Screenshot triggered via browser")
-                    
                 except Exception as e:
                     logger.error(f"HTTP trigger error: {e}")
-                    self.send_error(500, f"Screenshot capture failed: {str(e)}")
+                    try:
+                        self.send_error(500, f"Screenshot capture failed: {str(e)}")
+                    except Exception:
+                        pass
             else:
                 self.send_error(404, "Use / to trigger screenshot capture")
                 

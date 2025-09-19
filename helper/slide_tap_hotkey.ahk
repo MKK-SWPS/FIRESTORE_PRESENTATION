@@ -40,6 +40,7 @@ TrayMenu.Default := "&Status"
 LastTriggerTime := 0
 TriggerCount := 0
 ConnectionStatus := "Unknown"
+Global CaptureCounter := 0
 
 ; Register the hotkey
 try {
@@ -53,7 +54,7 @@ try {
 
 ; Main hotkey function
 TriggerScreenshot(*) {
-    global LastTriggerTime, TriggerCount, HELPER_URL
+    global LastTriggerTime, TriggerCount, HELPER_URL, CaptureCounter
     
     ; Prevent rapid triggering (debounce)
     CurrentTime := A_TickCount
@@ -65,6 +66,7 @@ TriggerScreenshot(*) {
     
     LastTriggerTime := CurrentTime
     TriggerCount++
+    CaptureCounter++
     
     ; Show immediate feedback
     ShowTrayTip("Capturing Screenshot", "Sending capture request to Slide Tap Helper...", 2000)
@@ -73,9 +75,12 @@ TriggerScreenshot(*) {
     try {
         ; Create HTTP request
         http := ComObject("WinHttp.WinHttpRequest.5.1")
-        http.Open("GET", HELPER_URL, false)
+        ; Build URL with cache buster & capture id
+        url := HELPER_URL . "?t=" . A_TickCount . "&cid=" . CaptureCounter
+        http.Open("GET", url, false)
         http.SetRequestHeader("User-Agent", "Slide-Tap-Hotkey/" . APP_VERSION)
-        http.SetTimeouts(5000, 5000, 5000, 5000)  ; 5 second timeouts
+        ; Increase timeouts (resolve, connect, send, receive) to 15000ms
+        http.SetTimeouts(15000, 15000, 15000, 15000)
         
         ; Send request
         http.Send()

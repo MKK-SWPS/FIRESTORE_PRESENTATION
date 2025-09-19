@@ -354,14 +354,14 @@ class HotkeyManager:
                 logger.error(f"Error unregistering hotkey: {e}")
 
 
-class DesktopHelper:
+class DesktopHelper(QApplication):
     """Main application class coordinating all components."""
     
     def __init__(self, config_path='config.json'):
+        super().__init__(sys.argv)
         self.config = self._load_config(config_path)
         # Track startup time to ignore stale Firestore responses
         self.start_time = time.time()
-        self.app = QApplication(sys.argv)
         
         # Firebase setup
         self.db = None
@@ -382,6 +382,12 @@ class DesktopHelper:
         self.current_session = {}
         self.current_slide_index = -1
         
+        # Capture in-progress guard
+        self._capture_in_progress = False
+        self._last_capture_ts = 0
+        self._capture_cooldown_ms = 3000  # 3s safety to prevent cascades
+        self._capture_counter = 0
+    
     def _load_config(self, config_path):
         """Load configuration from JSON file."""
         # Check if custom config exists, otherwise use example
@@ -579,33 +585,44 @@ class DesktopHelper:
     
     def _on_hotkey_pressed(self):
         """Handle Ctrl+B hotkey press."""
-        logger.info("Hotkey pressed - capturing screenshot")
-        
+        # Reentrancy / cooldown guard
+        now_ms = int(time.time() * 1000)
+        if self._capture_in_progress:
+            logger.warning("⛔ Capture skipped: another capture still in progress")
+            return
+        if now_ms - self._last_capture_ts < self._capture_cooldown_ms:
+            remaining = (self._capture_cooldown_ms - (now_ms - self._last_capture_ts)) / 1000
+            logger.warning(f"⏳ Capture skipped: cooldown {remaining:.2f}s remaining")
+            return
+        self._capture_in_progress = True
+        self._last_capture_ts = now_ms
+        self._capture_counter += 1
+        capture_id = self._capture_counter
+        start_time = time.time()
+        logger.info(f"🎬 Capture[{capture_id}] START trigger=hotkey current_slide_index={self.current_slide_index}")
         try:
             # Clear overlay dots immediately
             if self.overlay:
                 self.overlay.clear_dots()
-            
-            # Capture screenshot
+
             img, monitor = self._capture_screenshot()
             if img is None:
-                logger.error("Failed to capture screenshot")
+                logger.error(f"Capture[{capture_id}] Failed: screenshot grab returned None")
                 return
-            
-            # Upload to Firebase
             image_url, screenshot_meta = self._upload_screenshot(img, monitor)
             if image_url is None:
-                logger.error("Failed to upload screenshot")
+                logger.error(f"Capture[{capture_id}] Failed: upload returned None")
                 return
-            
-            # Update Firestore
             new_slide_index = self._update_session_document(image_url, screenshot_meta)
             if new_slide_index is not None:
                 self.current_slide_index = new_slide_index
-                logger.info(f"Successfully created slide {new_slide_index + 1}")
-            
+                logger.info(f"Capture[{capture_id}] ✅ Stored slide_index={new_slide_index}")
         except Exception as e:
-            logger.error(f"Error processing hotkey: {e}")
+            logger.exception(f"Capture[{capture_id}] ERROR: {e}")
+        finally:
+            elapsed = (time.time() - start_time) * 1000
+            logger.info(f"🎬 Capture[{capture_id}] END elapsed={elapsed:.1f}ms")
+            self._capture_in_progress = False
     
     def _on_session_changed(self, session_data):
         """Handle session document changes from Firestore."""
@@ -848,7 +865,7 @@ class DesktopHelper:
             self.message_timer.start(10)  # Check every 10ms
             
             # Start Qt event loop
-            return self.app.exec()
+            return self.exec()
             
         except KeyboardInterrupt:
             logger.info("Interrupted by user")
