@@ -57,8 +57,9 @@ TriggerScreenshot(*) {
     
     ; Prevent rapid triggering (debounce)
     CurrentTime := A_TickCount
-    if (CurrentTime - LastTriggerTime < 1000) {
-        ShowTrayTip("Hotkey Cooldown", "Please wait 1 second between captures", 2000, 2)
+    if (CurrentTime - LastTriggerTime < 2000) {
+        RemainingTime := Round((2000 - (CurrentTime - LastTriggerTime)) / 1000, 1)
+        ShowTrayTip("Hotkey Cooldown", "Please wait " . RemainingTime . "s between captures", 2000, 2)
         return
     }
     

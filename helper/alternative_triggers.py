@@ -4,11 +4,69 @@ Alternative trigger methods for screenshot capture when hotkeys don't work
 
 import threading
 import time
+import json
 import os
-from http.server import HTTPServer, SimpleHTTPRequestHandler
 import logging
+from http.server import HTTPServer, BaseHTTPRequestHandler, SimpleHTTPRequestHandler
+from urllib.parse import urlparse, parse_qs
+
+# Import the main helper functions
+try:
+    from main import capture_screenshot, upload_to_storage, update_session_state
+except ImportError:
+    # Fallback imports if main is not available
+    def capture_screenshot():
+        return "dummy_screenshot.png"
+    
+    def upload_to_storage(path):
+        return "http://dummy-url.com/image.png"
+    
+    def update_session_state(url):
+        pass
+
+# Global variables for HTTP trigger cooldown
+last_http_trigger_time = 0
+HTTP_TRIGGER_COOLDOWN_MS = 2000  # 2 second cooldown between captures
 
 logger = logging.getLogger(__name__)
+
+
+def handle_http_trigger():
+    """Handle HTTP trigger for screenshot capture with cooldown protection."""
+    global last_http_trigger_time
+    
+    current_time = time.time() * 1000  # milliseconds
+    
+    # Check cooldown
+    if current_time - last_http_trigger_time < HTTP_TRIGGER_COOLDOWN_MS:
+        cooldown_remaining = int((HTTP_TRIGGER_COOLDOWN_MS - (current_time - last_http_trigger_time)) / 1000)
+        print(f"⏰ HTTP trigger cooldown active - {cooldown_remaining}s remaining")
+        return f"Cooldown active - please wait {cooldown_remaining} seconds"
+    
+    # Update last trigger time
+    last_http_trigger_time = current_time
+    
+    print("📸 HTTP trigger activated - capturing screenshot...")
+    
+    try:
+        # Capture screenshot
+        screenshot_path = capture_screenshot()
+        print(f"📷 Screenshot captured: {screenshot_path}")
+        
+        # Upload to Firebase Storage
+        image_url = upload_to_storage(screenshot_path)
+        print(f"☁️ Uploaded to storage: {image_url}")
+        
+        # Update session state in Firestore
+        update_session_state(image_url)
+        print("🔄 Session state updated")
+        
+        print("✅ Screenshot capture and upload completed successfully")
+        return "Screenshot captured and uploaded successfully!"
+        
+    except Exception as e:
+        print(f"❌ HTTP trigger failed: {e}")
+        return f"Error: {str(e)}"
 
 
 class ScreenshotHTTPServer:
@@ -28,8 +86,8 @@ class ScreenshotHTTPServer:
         def do_GET(self):
             if self.path == '/capture' or self.path == '/':
                 try:
-                    if self.screenshot_callback:
-                        self.screenshot_callback()
+                    # Use the new handle_http_trigger function with cooldown
+                    result = handle_http_trigger()
                     
                     # Detect if request is from AutoHotkey
                     user_agent = self.headers.get('User-Agent', '')
@@ -44,8 +102,7 @@ class ScreenshotHTTPServer:
                         self.send_header('Cache-Control', 'no-cache')
                         self.end_headers()
                         
-                        response_text = f"Screenshot captured successfully via AutoHotkey!"
-                        self.wfile.write(response_text.encode('utf-8'))
+                        self.wfile.write(result.encode('utf-8'))
                         logger.info(f"Screenshot triggered via AutoHotkey: {user_agent}")
                         
                     else:
@@ -59,14 +116,14 @@ class ScreenshotHTTPServer:
                         response_html = f"""<!DOCTYPE html>
 <html>
 <head>
-    <title>Screenshot Captured</title>
+    <title>Screenshot Result</title>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
 </head>
 <body style="background: #2E3440; color: white; text-align: center; padding: 50px;">
-    <h1>Screenshot Captured Successfully!</h1>
-    <p style="color: #A3BE8C; font-size: 24px;">Screenshot uploaded to Firebase</p>
-    <button onclick="location.reload()" style="background: #5E81AC; color: white; border: none; padding: 15px 30px; font-size: 16px; cursor: pointer;">Capture Another</button>
+    <h1>Screenshot Trigger</h1>
+    <p style="color: #A3BE8C; font-size: 18px;">{result}</p>
+    <button onclick="location.reload()" style="background: #5E81AC; color: white; border: none; padding: 15px 30px; font-size: 16px; cursor: pointer;">Try Again</button>
     <hr style="margin: 40px 0; border-color: #4C566A;">
     <h3>Bookmark This Page</h3>
     <p>Quick access: <strong>http://localhost:{port}</strong></p>
