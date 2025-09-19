@@ -6,7 +6,7 @@
     "Get Firebase config from Firebase Console > Project Settings"
   ],
   
-  "session_id": "lecture-2025-09-18",
+  "session_id": "mkk-presentation",
   "_session_id_note": "Unique identifier for this presentation session. Students will use the same ID.",
   
   "service_account_path": "serviceAccount.json",
