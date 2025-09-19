@@ -31,7 +31,7 @@ HTTP_TRIGGER_COOLDOWN_MS = 2000  # 2 second cooldown between captures
 logger = logging.getLogger(__name__)
 
 
-def handle_http_trigger():
+def handle_http_trigger(callback=None):
     """Handle HTTP trigger for screenshot capture with cooldown protection."""
     global last_http_trigger_time
     
@@ -49,20 +49,24 @@ def handle_http_trigger():
     print("📸 HTTP trigger activated - capturing screenshot...")
     
     try:
-        # Capture screenshot
-        screenshot_path = capture_screenshot()
-        print(f"📷 Screenshot captured: {screenshot_path}")
-        
-        # Upload to Firebase Storage
-        image_url = upload_to_storage(screenshot_path)
-        print(f"☁️ Uploaded to storage: {image_url}")
-        
-        # Update session state in Firestore
-        update_session_state(image_url)
-        print("🔄 Session state updated")
-        
-        print("✅ Screenshot capture and upload completed successfully")
-        return "Screenshot captured and uploaded successfully!"
+        if callback:
+            # Use the callback function provided by the main application
+            callback()
+            print("✅ Screenshot capture completed via callback")
+            return "Screenshot captured and uploaded successfully!"
+        else:
+            # Fallback to direct imports (this should not be used in normal operation)
+            screenshot_path = capture_screenshot()
+            print(f"📷 Screenshot captured: {screenshot_path}")
+            
+            image_url = upload_to_storage(screenshot_path)
+            print(f"☁️ Uploaded to storage: {image_url}")
+            
+            update_session_state(image_url)
+            print("🔄 Session state updated")
+            
+            print("✅ Screenshot capture and upload completed successfully")
+            return "Screenshot captured and uploaded successfully!"
         
     except Exception as e:
         print(f"❌ HTTP trigger failed: {e}")
@@ -86,8 +90,8 @@ class ScreenshotHTTPServer:
         def do_GET(self):
             if self.path == '/capture' or self.path == '/':
                 try:
-                    # Use the new handle_http_trigger function with cooldown
-                    result = handle_http_trigger()
+                    # Use the new handle_http_trigger function with cooldown and callback
+                    result = handle_http_trigger(callback=self.screenshot_callback)
                     
                     # Detect if request is from AutoHotkey
                     user_agent = self.headers.get('User-Agent', '')
