@@ -196,7 +196,7 @@ ShowTrayTip(Title, Text, Duration := 3000, IconType := 1) {
 }
 
 ; Periodic connection check (every 30 seconds)
-SetTimer(TestConnectionSilent, 30000)
+SetTimer(PingHelperSilent, 30000)
 
 ; Clean exit
 ExitApp(*) {
@@ -204,6 +204,3 @@ ExitApp(*) {
     Sleep(1000)
     ExitApp()
 }
-
-; Auto-start connection test after 3 seconds
-SetTimer(() => TestConnection(), -3000)
