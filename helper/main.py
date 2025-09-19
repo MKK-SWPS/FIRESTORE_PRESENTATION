@@ -69,7 +69,7 @@ from alternative_triggers import ScreenshotHTTPServer, FileWatcherTrigger
 
 # Configure logging
 def setup_logging(debug=False):
-    """Configure logging to file instead of console."""
+    """Configure logging to file with continuous flushing."""
     # Create logs directory if it doesn't exist
     log_dir = Path(__file__).parent / 'logs'
     log_dir.mkdir(exist_ok=True)
@@ -81,8 +81,14 @@ def setup_logging(debug=False):
     # Configure logging format
     log_format = '%(asctime)s - %(levelname)s - %(message)s'
     
-    # Set up file handler
-    file_handler = logging.FileHandler(log_file, encoding='utf-8')
+    # Custom handler that flushes after each write
+    class FlushFileHandler(logging.FileHandler):
+        def emit(self, record):
+            super().emit(record)
+            self.flush()  # Flush after every log entry
+    
+    # Set up file handler with auto-flush
+    file_handler = FlushFileHandler(log_file, encoding='utf-8')
     file_handler.setFormatter(logging.Formatter(log_format))
     
     # Configure root logger
@@ -98,13 +104,20 @@ def setup_logging(debug=False):
     # Also create a latest.log reference for easy access
     latest_log = log_dir / 'latest.log'
     try:
-        # On Windows, we can't use symlinks easily, so copy the filename
         with open(latest_log, 'w', encoding='utf-8') as f:
             f.write(f"Current log file: {log_file.name}\n")
+            f.write(f"Full path: {log_file.absolute()}\n")
     except Exception:
         pass
     
-    return logging.getLogger(__name__)
+    # Log the startup info immediately
+    logger = logging.getLogger(__name__)
+    logger.info("=" * 60)
+    logger.info(f"Log file created: {log_file.absolute()}")
+    logger.info(f"Logs directory: {log_dir.absolute()}")
+    logger.info("=" * 60)
+    
+    return logger
 
 # Initialize logger (will be replaced in main)
 logger = logging.getLogger(__name__)
@@ -651,14 +664,24 @@ class DesktopHelper:
                     debug_bg=debug_bg
                 )
                 
-                # Add emergency ESC key handler
+                # Add multiple emergency exit shortcuts
                 from PySide6.QtCore import Qt
                 from PySide6.QtGui import QShortcut, QKeySequence
-                self.emergency_shortcut = QShortcut(QKeySequence(Qt.Key_Escape), self.overlay)
-                self.emergency_shortcut.activated.connect(emergency_close)
+                
+                # ESC key
+                self.esc_shortcut = QShortcut(QKeySequence(Qt.Key_Escape), self.overlay)
+                self.esc_shortcut.activated.connect(emergency_close)
+                
+                # Ctrl+Alt+X
+                self.ctrl_alt_x = QShortcut(QKeySequence("Ctrl+Alt+X"), self.overlay)
+                self.ctrl_alt_x.activated.connect(emergency_close)
+                
+                # Alt+F4 (should work by default, but let's ensure it)
+                self.alt_f4 = QShortcut(QKeySequence("Alt+F4"), self.overlay)
+                self.alt_f4.activated.connect(emergency_close)
                 
                 logger.info(f"✅ Simple overlay created on monitor {monitor_index} (debug={debug_bg})")
-                logger.info("📌 Press ESC if overlay blocks your screen!")
+                logger.info("📌 Emergency exits: ESC, Ctrl+Alt+X, or Alt+F4")
                 
             else:
                 # Linux fallback
@@ -863,6 +886,22 @@ For setup instructions, see: https://github.com/MKK-SWPS/FIRESTORE_PRESENTATION
     # Parse arguments
     args = parser.parse_args()
     config_path = args.config
+    
+    # Check for debug flag
+    debug = '--debug' in sys.argv or '_debug' in sys.argv[0].lower()
+    
+    # Set up file logging with auto-flush
+    global logger
+    logger = setup_logging(debug=debug)
+    
+    logger.info("=" * 60)
+    logger.info("Starting Slide Tap Helper")
+    logger.info(f"Debug mode: {debug}")
+    logger.info(f"Python: {sys.version}")
+    logger.info(f"Platform: {platform.system()} {platform.release()}")
+    logger.info(f"Working directory: {Path.cwd()}")
+    logger.info(f"Executable path: {Path(sys.argv[0]).absolute()}")
+    logger.info("=" * 60)
     
     try:
         helper = DesktopHelper(config_path)

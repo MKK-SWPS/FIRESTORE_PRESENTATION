@@ -73,14 +73,15 @@ class SimpleOverlayWindow(QWidget):
                 Qt.WindowTransparentForInput | Qt.Tool)
         self.setWindowFlags(flags)
         
-        # Set transparency attributes
+        # Set transparency attributes - CRITICAL: prevent black background
         self.setAttribute(Qt.WA_TranslucentBackground, True)
-        self.setAttribute(Qt.WA_NoSystemBackground, True)
+        self.setAttribute(Qt.WA_NoSystemBackground, True)  # Prevent Qt from painting black background
         self.setAttribute(Qt.WA_ShowWithoutActivating, True)
         self.setAttribute(Qt.WA_TransparentForMouseEvents, True)
         
-        # Ensure transparency
+        # CRITICAL: Prevent any background painting
         self.setStyleSheet("background: transparent;")
+        self.setAutoFillBackground(False)  # Don't auto-fill with background color
         
         # Apply Windows-specific transparency and click-through
         if HAS_WIN32:
@@ -95,38 +96,6 @@ class SimpleOverlayWindow(QWidget):
     
     def _apply_windows_transparency(self):
         """Apply Windows-specific transparency for click-through behavior."""
-        try:
-            import win32gui
-            import win32con
-            
-            hwnd = int(self.winId())
-            if hwnd:
-                # Get current extended style
-                extended_style = win32gui.GetWindowLong(hwnd, win32con.GWL_EXSTYLE)
-                # Add transparent, layered, and no-activate flags
-                new_style = (extended_style | win32con.WS_EX_TRANSPARENT | 
-                           win32con.WS_EX_LAYERED | win32con.WS_EX_TOPMOST | 
-                           win32con.WS_EX_NOACTIVATE)
-                win32gui.SetWindowLong(hwnd, win32con.GWL_EXSTYLE, new_style)
-                # Set layer attributes for transparency
-                win32gui.SetLayeredWindowAttributes(hwnd, 0, 255, win32con.LWA_ALPHA)
-                logger.debug(f"Applied Windows click-through styles to HWND {hwnd}")
-        except Exception as e:
-            logger.debug(f"Windows transparency failed: {e}")
-    
-    def _apply_windows_transparency(self):
-        """Apply Windows-specific transparency for click-through behavior."""
-        try:
-            import win32gui
-            import win32con
-            
-            # Get window handle after it's created
-            QTimer.singleShot(100, self._delayed_transparency)
-        except Exception as e:
-            logger.debug(f"Could not set up Windows transparency: {e}")
-    
-    def _delayed_transparency(self):
-        """Apply transparency after window is fully created."""
         try:
             import win32gui
             import win32con
