@@ -628,7 +628,7 @@ class DesktopHelper:
     def _on_new_response(self, response_data, slide_index):
         """Handle new tap responses from students."""
         logger.info(f"🔍 New response received: slide_index={slide_index}, current_slide_index={self.current_slide_index}")
-        logger.info(f"� Response data: {response_data}")
+        logger.info(f"🎯 Response data: {response_data}")
 
         # Ignore stale responses from before startup (replay noise)
         ignore_seconds = self.config.get('ignore_past_responses_seconds', 0)
@@ -658,18 +658,43 @@ class DesktopHelper:
         
         logger.info(f"📐 Normalized coordinates: x={x:.3f}, y={y:.3f}")
         
-        # Convert to window-relative coordinates (overlay origin == monitor origin)
+        # Get monitor info - use PHYSICAL dimensions for coordinate mapping
         monitor, _ = self._get_monitor_info()
-        rel_x = int(x * monitor.width)
-        rel_y = int(y * monitor.height)
-        logger.info(f"🖥️ Relative coordinates: ({rel_x}, {rel_y}) within {monitor.width}x{monitor.height}")
         
-        # Add dot to overlay using relative coordinates
+        # Convert normalized coordinates (0-1) to physical monitor pixels
+        # This should be independent of Windows DPI scaling or Qt logical pixels
+        physical_x = int(x * monitor.width)
+        physical_y = int(y * monitor.height)
+        logger.info(f"🖥️ Physical monitor coordinates: ({physical_x}, {physical_y}) within {monitor.width}x{monitor.height}")
+        
+        # If overlay exists, get its DPI info for diagnostic purposes
         if self.overlay:
-            self.overlay.add_dot(rel_x, rel_y)
-            logger.info(f"✅ Dot added to overlay at ({rel_x}, {rel_y})")
-            logger.debug(f"Added dot at ({rel_x}, {rel_y}) from normalized ({x:.3f}, {y:.3f})")
-            logger.info("✅ Dot added successfully! Should be visible on overlay.")
+            try:
+                dpr = self.overlay.devicePixelRatioF() if hasattr(self.overlay, 'devicePixelRatioF') else 1.0
+                logical_w = self.overlay.width()
+                logical_h = self.overlay.height()
+                logger.info(f"🔍 Overlay DPI info: logical={logical_w}x{logical_h}, dpr={dpr:.2f}, physical_expected={logical_w*dpr:.0f}x{logical_h*dpr:.0f}")
+                
+                # Convert physical monitor coordinates to overlay widget coordinates
+                # If overlay uses logical pixels, we need to convert from physical
+                if dpr > 1.01:  # High DPI
+                    # Physical monitor coords -> logical overlay coords
+                    overlay_x = physical_x / dpr
+                    overlay_y = physical_y / dpr
+                    logger.info(f"🎯 DPI-adjusted overlay coordinates: ({overlay_x:.1f}, {overlay_y:.1f}) from physical ({physical_x}, {physical_y})")
+                else:
+                    # Standard DPI - use physical coordinates directly
+                    overlay_x = physical_x
+                    overlay_y = physical_y
+                    logger.info(f"🎯 Standard DPI overlay coordinates: ({overlay_x}, {overlay_y})")
+                
+                self.overlay.add_dot(overlay_x, overlay_y)
+                logger.info(f"✅ Dot added to overlay at ({overlay_x:.1f}, {overlay_y:.1f})")
+                
+            except Exception as e:
+                logger.error(f"❌ Error adding dot with DPI handling: {e}")
+                # Fallback to simple mapping
+                self.overlay.add_dot(physical_x, physical_y)
         else:
             logger.error("❌ Overlay is None - cannot add dot!")
         

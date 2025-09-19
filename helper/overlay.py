@@ -137,29 +137,26 @@ class SimpleOverlayWindow(QWidget):
     
     def add_dot(self, x, y):
         """Add a tap dot at window-relative coordinates.
-
-        If coordinates appear far outside expected widget geometry (possibly due to
-        high-DPI scaling mismatch), attempt a heuristic correction using devicePixelRatio.
+        
+        Coordinates should already be properly scaled for the overlay widget.
+        This method no longer applies DPI heuristics since proper scaling 
+        is handled in the calling code.
         """
         timestamp = time.time()
         w = self.width()
         h = self.height()
         dpr = self.devicePixelRatioF() if hasattr(self, 'devicePixelRatioF') else 1.0
 
-        orig_x, orig_y = x, y
-        # Heuristic: if coordinates exceed size by >25%, assume they are in physical pixels and convert
-        if (x > w * 1.25 or y > h * 1.25) and dpr > 1.01:
-            x = x / dpr
-            y = y / dpr
-            logger.info(f"Heuristic DPI adjust applied: ({orig_x},{orig_y}) -> ({x:.1f},{y:.1f}) with dpr={dpr:.2f}")
-
-        # Clamp to bounds +/- small margin
-        if x < -10 or y < -10 or x > w + 10 or y > h + 10:
-            logger.warning(f"Dropped dot out of bounds after adjustment ({x},{y}) widget={w}x{h} dpr={dpr:.2f}")
-            return
-
+        # Log the coordinates we received for debugging
+        logger.debug(f"Overlay add_dot called: ({x:.1f}, {y:.1f}) widget_size={w}x{h} dpr={dpr:.2f}")
+        
+        # Simple bounds check - allow small margin for edge cases
+        if x < -20 or y < -20 or x > w + 20 or y > h + 20:
+            logger.warning(f"Dot out of bounds: ({x:.1f},{y:.1f}) widget={w}x{h} - adding anyway")
+            # Note: We still add the dot even if out of bounds for debugging
+        
         self.dots.append((x, y, timestamp))
-        logger.debug(f"Added dot at window-relative ({x}, {y}) (orig:{orig_x},{orig_y}) w={w} h={h} dpr={dpr:.2f}")
+        logger.debug(f"Added dot to overlay: ({x:.1f}, {y:.1f}) total_dots={len(self.dots)}")
         
         # Force immediate repaint
         self.update()
